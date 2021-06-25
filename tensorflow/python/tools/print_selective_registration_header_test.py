@@ -19,6 +19,7 @@ from __future__ import division
 from __future__ import print_function
 
 import os
+import sys
 
 from google.protobuf import text_format
 
@@ -57,6 +58,9 @@ GRAPH_DEF_TXT = """
   }
 """
 
+# AccumulateNV2 is included because it should be included in the header despite
+# lacking a kernel (it's rewritten by AccumulateNV2RemovePass; see
+# core/common_runtime/accumulate_n_optimizer.cc.
 GRAPH_DEF_TXT_2 = """
   node: {
     name: "node_4"
@@ -65,11 +69,20 @@ GRAPH_DEF_TXT_2 = """
     device: "/cpu:0"
     attr: { key: "T" value: { type: DT_FLOAT } }
   }
+  node: {
+    name: "node_5"
+    op: "AccumulateNV2"
+    attr: { key: "T" value: { type: DT_INT32 } }
+    attr: { key  : "N" value: { i: 3 } }
+  }
 
 """
 
 
 class PrintOpFilegroupTest(test.TestCase):
+
+  def setUp(self):
+    _, self.script_name = os.path.split(sys.argv[0])
 
   def WriteGraphFiles(self, graphs):
     fnames = []
@@ -80,6 +93,12 @@ class PrintOpFilegroupTest(test.TestCase):
       fnames.append(fname)
     return fnames
 
+  def WriteTextFile(self, content):
+    fname = os.path.join(self.get_temp_dir(), 'text.txt')
+    with gfile.GFile(fname, 'w') as f:
+      f.write(content)
+    return [fname]
+
   def testGetOps(self):
     default_ops = 'NoOp:NoOp,_Recv:RecvOp,_Send:SendOp'
     graphs = [
@@ -89,11 +108,16 @@ class PrintOpFilegroupTest(test.TestCase):
 
     ops_and_kernels = selective_registration_header_lib.get_ops_and_kernels(
         'rawproto', self.WriteGraphFiles(graphs), default_ops)
+    matmul_prefix = 'Batch'
+
     self.assertListEqual(
         [
+            ('AccumulateNV2', None),  #
             ('BiasAdd', 'BiasOp<CPUDevice, float>'),  #
-            ('MatMul', 'MatMulOp<CPUDevice, double, false >'),  #
-            ('MatMul', 'MatMulOp<CPUDevice, float, false >'),  #
+            ('MatMul', matmul_prefix +
+             'MatMulOp<CPUDevice, double, double, double, true>'),  #
+            ('MatMul', matmul_prefix +
+             'MatMulOp<CPUDevice, float, float, float, true>'),  #
             ('NoOp', 'NoOp'),  #
             ('Reshape', 'ReshapeOp'),  #
             ('_Recv', 'RecvOp'),  #
@@ -107,15 +131,71 @@ class PrintOpFilegroupTest(test.TestCase):
         'rawproto', self.WriteGraphFiles(graphs), default_ops)
     self.assertListEqual(
         [
+            ('AccumulateNV2', None),  #
             ('BiasAdd', 'BiasOp<CPUDevice, float>'),  #
-            ('MatMul', 'MatMulOp<CPUDevice, double, false >'),  #
-            ('MatMul', 'MatMulOp<CPUDevice, float, false >'),  #
+            ('MatMul', matmul_prefix +
+             'MatMulOp<CPUDevice, double, double, double, true>'),  #
+            ('MatMul', matmul_prefix +
+             'MatMulOp<CPUDevice, float, float, float, true>'),  #
             ('NoOp', 'NoOp'),  #
             ('Reshape', 'ReshapeOp'),  #
             ('_Recv', 'RecvOp'),  #
             ('_Send', 'SendOp'),  #
         ],
         ops_and_kernels)
+
+  def testGetOpsFromList(self):
+    default_ops = ''
+    # Test with 2 different ops.
+    ops_list = """[["Add", "BinaryOp<CPUDevice, functor::add<float>>"],
+        ["Softplus", "SoftplusOp<CPUDevice, float>"]]"""
+    ops_and_kernels = selective_registration_header_lib.get_ops_and_kernels(
+        'ops_list', self.WriteTextFile(ops_list), default_ops)
+    self.assertListEqual([
+        ('Add', 'BinaryOp<CPUDevice, functor::add<float>>'),
+        ('Softplus', 'SoftplusOp<CPUDevice, float>'),
+    ], ops_and_kernels)
+
+    # Test with a single op.
+    ops_list = '[["Softplus", "SoftplusOp<CPUDevice, float>"]]'
+    ops_and_kernels = selective_registration_header_lib.get_ops_and_kernels(
+        'ops_list', self.WriteTextFile(ops_list), default_ops)
+    self.assertListEqual([
+        ('Softplus', 'SoftplusOp<CPUDevice, float>'),
+    ], ops_and_kernels)
+
+    # Test with duplicated op.
+    ops_list = """[["Add", "BinaryOp<CPUDevice, functor::add<float>>"],
+        ["Add", "BinaryOp<CPUDevice, functor::add<float>>"]]"""
+    ops_and_kernels = selective_registration_header_lib.get_ops_and_kernels(
+        'ops_list', self.WriteTextFile(ops_list), default_ops)
+    self.assertListEqual([
+        ('Add', 'BinaryOp<CPUDevice, functor::add<float>>'),
+    ], ops_and_kernels)
+
+    # Test op with no kernel.
+    ops_list = '[["Softplus", ""]]'
+    ops_and_kernels = selective_registration_header_lib.get_ops_and_kernels(
+        'ops_list', self.WriteTextFile(ops_list), default_ops)
+    self.assertListEqual([
+        ('Softplus', None),
+    ], ops_and_kernels)
+
+    # Test two ops_list files.
+    ops_list = '[["Softplus", "SoftplusOp<CPUDevice, float>"]]'
+    ops_and_kernels = selective_registration_header_lib.get_ops_and_kernels(
+        'ops_list',
+        self.WriteTextFile(ops_list) + self.WriteTextFile(ops_list),
+        default_ops)
+    self.assertListEqual([
+        ('Softplus', 'SoftplusOp<CPUDevice, float>'),
+    ], ops_and_kernels)
+
+    # Test empty file.
+    ops_list = ''
+    with self.assertRaises(Exception):
+      ops_and_kernels = selective_registration_header_lib.get_ops_and_kernels(
+          'ops_list', self.WriteTextFile(ops_list), default_ops)
 
   def testAll(self):
     default_ops = 'all'
@@ -130,6 +210,7 @@ class PrintOpFilegroupTest(test.TestCase):
         ops_and_kernels, include_all_ops_and_kernels=True)
     self.assertListEqual(
         [
+            '// This file was autogenerated by %s' % self.script_name,
             '#ifndef OPS_TO_REGISTER',  #
             '#define OPS_TO_REGISTER',  #
             '#define SHOULD_REGISTER_OP(op) true',  #
@@ -148,15 +229,9 @@ class PrintOpFilegroupTest(test.TestCase):
     default_ops = ''
     graphs = [text_format.Parse(GRAPH_DEF_TXT_2, graph_pb2.GraphDef())]
 
-    expected = '''#ifndef OPS_TO_REGISTER
+    expected = """// This file was autogenerated by %s
+#ifndef OPS_TO_REGISTER
 #define OPS_TO_REGISTER
-constexpr inline bool ShouldRegisterOp(const char op[]) {
-  return false
-     || (strcmp(op, "BiasAdd") == 0)
-  ;
-}
-#define SHOULD_REGISTER_OP(op) ShouldRegisterOp(op)
-
 
     namespace {
       constexpr const char* skip(const char* x) {
@@ -188,8 +263,16 @@ constexpr inline bool ShouldRegisterOp(const char op[]) {
 };
 #define SHOULD_REGISTER_OP_KERNEL(clz) (find_in<sizeof(kNecessaryOpKernelClasses) / sizeof(*kNecessaryOpKernelClasses)>::f(clz, kNecessaryOpKernelClasses))
 
+constexpr inline bool ShouldRegisterOp(const char op[]) {
+  return false
+     || isequal(op, "AccumulateNV2")
+     || isequal(op, "BiasAdd")
+  ;
+}
+#define SHOULD_REGISTER_OP(op) ShouldRegisterOp(op)
+
 #define SHOULD_REGISTER_OP_GRADIENT false
-#endif'''
+#endif""" % self.script_name
 
     header = selective_registration_header_lib.get_header(
         self.WriteGraphFiles(graphs), 'rawproto', default_ops)

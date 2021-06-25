@@ -70,16 +70,19 @@ class SparseDenseBinaryOpShared : public OpKernel {
                 errors::InvalidArgument(
                     "Input sp_indices should be a matrix but received shape: ",
                     indices_t->shape().DebugString()));
-    OP_REQUIRES(ctx, TensorShapeUtils::IsVector(values_t->shape()) &&
-                         TensorShapeUtils::IsVector(shape_t->shape()),
+    OP_REQUIRES(ctx,
+                TensorShapeUtils::IsVector(values_t->shape()) &&
+                    TensorShapeUtils::IsVector(shape_t->shape()),
                 errors::InvalidArgument(
                     "Inputs sp_values and sp_shape should be vectors "
                     "but received shapes: ",
                     values_t->shape().DebugString(), " and ",
                     shape_t->shape().DebugString()));
-    OP_REQUIRES(ctx, indices_t->dim_size(0) < std::numeric_limits<int>::max(),
-                errors::InvalidArgument(
-                    "Number of non-zero elements exceeds int32 range"));
+    OP_REQUIRES(
+        ctx, values_t->dim_size(0) == indices_t->dim_size(0),
+        errors::InvalidArgument(
+            "The first dimension of values and indices should match. (",
+            values_t->dim_size(0), " vs. ", indices_t->dim_size(0), ")"));
 
     const auto indices_mat = indices_t->matrix<int64>();
     const auto shape_vec = shape_t->vec<int64>();
@@ -87,12 +90,12 @@ class SparseDenseBinaryOpShared : public OpKernel {
     const auto rhs_dims = BCast::FromShape(dense_t->shape());
     BCast b(lhs_dims, rhs_dims, false);  // false for keeping the same num dims.
 
-    // True iff (size(lhs) > size(rhs)), or (sizes equal, lhs cwise rhs).
+    // True iff (size(lhs) >= size(rhs)) and all dims in lhs is greater or equal
+    // to dims in rhs (from right to left).
     auto VecGreaterEq = [](ArraySlice<int64> lhs, ArraySlice<int64> rhs) {
-      if (lhs.size() > rhs.size()) return true;
       if (lhs.size() < rhs.size()) return false;
-      for (size_t i = 0; i < lhs.size(); ++i) {
-        if (lhs[i] < rhs[i]) return false;
+      for (size_t i = 0; i < rhs.size(); ++i) {
+        if (lhs[lhs.size() - 1 - i] < rhs[rhs.size() - 1 - i]) return false;
       }
       return true;
     };
@@ -100,12 +103,12 @@ class SparseDenseBinaryOpShared : public OpKernel {
                 errors::InvalidArgument(
                     "SparseDenseBinaryOpShared broadcasts dense to sparse "
                     "only; got incompatible shapes: [",
-                    str_util::Join(lhs_dims, ","), "] vs. [",
-                    str_util::Join(rhs_dims, ","), "]"));
+                    absl::StrJoin(lhs_dims, ","), "] vs. [",
+                    absl::StrJoin(rhs_dims, ","), "]"));
 
     Tensor *output_values = nullptr;
     Tensor dense_gathered;
-    const int nnz = static_cast<int>(indices_t->dim_size(0));
+    const int64 nnz = indices_t->dim_size(0);
     OP_REQUIRES_OK(ctx,
                    ctx->allocate_output(0, TensorShape({nnz}), &output_values));
     OP_REQUIRES_OK(
@@ -150,8 +153,9 @@ class SparseDenseBinaryOpShared : public OpKernel {
       CASE(4);
       CASE(5);
       default:
-        OP_REQUIRES(ctx, false, errors::InvalidArgument(
-                                    "Only tensors with ranks between 1 and 5 "
+        OP_REQUIRES(
+            ctx, false,
+            errors::InvalidArgument("Only tensors with ranks between 1 and 5 "
                                     "are currently supported.  Tensor rank: ",
                                     ndims));
 #undef CASE

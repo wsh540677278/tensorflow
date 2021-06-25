@@ -17,11 +17,11 @@ limitations under the License.
 
 #include "tensorflow/cc/training/queue_runner.h"
 #include "tensorflow/core/lib/core/blocking_counter.h"
-#include "tensorflow/core/lib/core/error_codes.pb.h"
 #include "tensorflow/core/lib/core/notification.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/test.h"
+#include "tensorflow/core/protobuf/error_codes.pb.h"
 #include "tensorflow/core/public/session.h"
 
 namespace tensorflow {
@@ -55,7 +55,7 @@ TEST(CoordinatorTest, TestStopAndWaitOnStop) {
 
 class MockQueueRunner : public RunnerInterface {
  public:
-  MockQueueRunner(Coordinator* coord) {
+  explicit MockQueueRunner(Coordinator* coord) {
     coord_ = coord;
     join_counter_ = nullptr;
     thread_pool_.reset(new thread::ThreadPool(Env::Default(), "test-pool", 10));
@@ -79,7 +79,7 @@ class MockQueueRunner : public RunnerInterface {
                                      status, counter, start));
   }
 
-  Status Join() {
+  Status Join() override {
     if (join_counter_ != nullptr) {
       (*join_counter_)++;
     }

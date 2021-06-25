@@ -16,23 +16,14 @@ limitations under the License.
 #include "tensorflow/core/kernels/cwise_ops_common.h"
 
 namespace tensorflow {
-REGISTER7(BinaryOp, CPU, "Pow", functor::pow, float, Eigen::half, double, int32,
-          int64, complex64, complex128);
+REGISTER6(BinaryOp, CPU, "Pow", functor::pow, float, Eigen::half, bfloat16,
+          double, complex64, complex128);
+REGISTER4(BinaryOp, CPU, "Pow", functor::safe_pow, int8, int16, int32, int64);
 
-#if TENSORFLOW_USE_SYCL
-#define REGISTER_SYCL_KERNEL(TYPE)                                    \
-  REGISTER_KERNEL_BUILDER(                                            \
-                          Name("Pow")                                 \
-                          .Device(DEVICE_SYCL)                        \
-                          .TypeConstraint<TYPE>("T"),                 \
-                          BinaryOp<SYCLDevice, functor::pow<TYPE>>);
-REGISTER_SYCL_KERNEL(float);
-REGISTER_SYCL_KERNEL(double);
-#undef REGISTER_SYCL_KERNEL
-#endif // TENSORFLOW_USE_SYCL
-
-#if GOOGLE_CUDA
-REGISTER4(BinaryOp, GPU, "Pow", functor::pow, float, Eigen::half, double,
-          int64);
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+#if !defined(MLIR_GENERATED_GPU_KERNELS_ENABLED)
+REGISTER3(BinaryOp, GPU, "Pow", functor::pow, float, Eigen::half, double);
+REGISTER(BinaryOp, GPU, "Pow", functor::safe_pow_ignore_error, int64);
+#endif
 #endif
 }  // namespace tensorflow

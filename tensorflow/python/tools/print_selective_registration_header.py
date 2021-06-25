@@ -14,13 +14,21 @@
 # ==============================================================================
 r"""Prints a header file to be used with SELECTIVE_REGISTRATION.
 
-Example usage:
-  print_selective_registration_header \
-      --graphs=path/to/graph.pb > ops_to_register.h
+An example of command-line usage is:
+  bazel build tensorflow/python/tools:print_selective_registration_header && \
+  bazel-bin/tensorflow/python/tools/print_selective_registration_header \
+    --graphs=path/to/graph.pb > ops_to_register.h
 
-  Then when compiling tensorflow, include ops_to_register.h in the include
-  search path and pass -DSELECTIVE_REGISTRATION  - see
-  core/framework/selective_registration.h for more details.
+Then when compiling tensorflow, include ops_to_register.h in the include search
+path and pass -DSELECTIVE_REGISTRATION and -DSUPPORT_SELECTIVE_REGISTRATION
+ - see core/framework/selective_registration.h for more details.
+
+When compiling for Android:
+  bazel build -c opt --copt="-DSELECTIVE_REGISTRATION" \
+    --copt="-DSUPPORT_SELECTIVE_REGISTRATION" \
+    //tensorflow/tools/android/inference_interface:libtensorflow_inference.so \
+    --host_crosstool_top=@bazel_tools//tools/cpp:toolchain \
+    --crosstool_top=//external:android/crosstool --cpu=armeabi-v7a
 """
 
 from __future__ import absolute_import
@@ -30,7 +38,7 @@ from __future__ import print_function
 import argparse
 import sys
 
-from tensorflow.python.platform import app
+from absl import app
 from tensorflow.python.tools import selective_registration_header_lib
 
 FLAGS = None
@@ -38,8 +46,10 @@ FLAGS = None
 
 def main(unused_argv):
   graphs = FLAGS.graphs.split(',')
-  print(selective_registration_header_lib.get_header(
-      graphs, FLAGS.proto_fileformat, FLAGS.default_ops))
+  print(
+      selective_registration_header_lib.get_header(graphs,
+                                                   FLAGS.proto_fileformat,
+                                                   FLAGS.default_ops))
 
 
 if __name__ == '__main__':
@@ -55,7 +65,9 @@ if __name__ == '__main__':
       '--proto_fileformat',
       type=str,
       default='rawproto',
-      help='Format of proto file, either textproto or rawproto.')
+      help='Format of proto file, either textproto, rawproto or ops_list. The '
+      'ops_list is the file contains the list of ops in JSON format. Ex: '
+      '"[["Add", "BinaryOp<CPUDevice, functor::add<float>>"]]".')
   parser.add_argument(
       '--default_ops',
       type=str,

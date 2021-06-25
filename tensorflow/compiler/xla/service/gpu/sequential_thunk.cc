@@ -15,30 +15,40 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/service/gpu/sequential_thunk.h"
 
+#include "tensorflow/compiler/xla/service/gpu/hlo_execution_profiler.h"
 #include "tensorflow/core/lib/core/errors.h"
+#include "tensorflow/core/profiler/lib/scoped_annotation.h"
 
 namespace xla {
 namespace gpu {
 
-SequentialThunk::SequentialThunk(std::vector<std::unique_ptr<Thunk>>&& thunks,
-                                 const HloInstruction* hlo)
-    : Thunk(Kind::kSequential, hlo), thunks_(std::move(thunks)) {}
+using ::tensorflow::profiler::ScopedAnnotation;
 
-tensorflow::Status SequentialThunk::Initialize(
-    const GpuExecutable& executable) {
-  for (auto& thunk : thunks_) {
-    TF_RETURN_IF_ERROR(thunk->Initialize(executable));
-  }
-  return tensorflow::Status::OK();
+SequentialThunk::SequentialThunk(ThunkInfo thunk_info, ThunkSequence thunks)
+    : Thunk(Kind::kSequential, thunk_info), thunks_(std::move(thunks)) {}
+
+std::string SequentialThunk::ToStringExtra(int indent) const {
+  std::string result = "\n";
+  absl::StrAppend(&result, thunks().ToString(indent + 1, nullptr));
+  return result;
 }
 
-tensorflow::Status SequentialThunk::ExecuteOnStream(
-    const BufferAllocations& buffer_allocations,
-    perftools::gputools::Stream* stream) {
-  for (const auto& thunk : thunks_) {
-    TF_RETURN_IF_ERROR(thunk->ExecuteOnStream(buffer_allocations, stream));
+Status SequentialThunk::Initialize(const GpuExecutable& executable,
+                                   se::StreamExecutor* executor) {
+  for (auto& thunk : thunks_) {
+    TF_RETURN_IF_ERROR(thunk->Initialize(executable, executor));
   }
-  return tensorflow::Status::OK();
+  return Status::OK();
+}
+
+Status SequentialThunk::ExecuteOnStream(const ExecuteParams& params) {
+  auto op_profiler =
+      params.profiler->MakeScopedInstructionProfiler(profile_index());
+  for (const auto& thunk : thunks_) {
+    ScopedAnnotation annotation([&] { return thunk->profile_annotation(); });
+    TF_RETURN_IF_ERROR(thunk->ExecuteOnStream(params));
+  }
+  return Status::OK();
 }
 
 }  // namespace gpu

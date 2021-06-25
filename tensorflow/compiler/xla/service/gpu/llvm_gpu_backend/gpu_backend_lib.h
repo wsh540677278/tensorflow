@@ -20,15 +20,18 @@ limitations under the License.
 #include <string>
 #include <utility>
 
-#include "external/llvm/include/llvm/IR/Module.h"
+#include "absl/strings/string_view.h"
+#include "llvm/IR/Module.h"
+#include "llvm/Target/TargetMachine.h"
+#include "tensorflow/compiler/xla/service/gpu/gpu_types.h"
 #include "tensorflow/compiler/xla/service/hlo_module_config.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/types.h"
-#include "tensorflow/core/lib/core/stringpiece.h"
 
 namespace xla {
 namespace gpu {
 
+namespace nvptx {
 // Compiles the argument module and returns it. libdevice_dir_path is the parent
 // directory of the libdevice bitcode libraries. The contents of the module may
 // be changed.
@@ -36,10 +39,20 @@ namespace gpu {
 // The Compile.* interfaces each create their own llvm::LLVMContext objects for
 // thread safety, but note that LLVM's multithreaded support is very
 // preliminary; multithreaded use is not recommended at this time.
-StatusOr<string> CompileToPtx(llvm::Module* module,
-                              std::pair<int, int> compute_capability,
-                              const HloModuleConfig& hlo_module_config,
-                              const string& libdevice_dir_path);
+StatusOr<string> CompileToPtx(
+    llvm::Module* module, GpuVersion gpu_version,
+    const HloModuleConfig& hlo_module_config, const string& libdevice_dir_path,
+    std::function<void(llvm::TargetMachine*)> configure_target = nullptr);
+}  // namespace nvptx
+
+namespace amdgpu {
+// Compiles the argument module and returns it with LLVM AMDGPU backend.
+// rocdl_dir_path is the parent directory of ROCm-Device-Libs bitcode libraries.
+// The contents of the module may be changed.
+StatusOr<std::vector<uint8>> CompileToHsaco(
+    llvm::Module* module, GpuVersion gpu_version,
+    const HloModuleConfig& hlo_module_config, const string& rocdl_dir_path);
+}  // namespace amdgpu
 
 }  // namespace gpu
 }  // namespace xla

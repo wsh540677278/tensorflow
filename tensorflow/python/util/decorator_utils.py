@@ -75,14 +75,32 @@ def _normalize_docstring(docstring):
 
 def add_notice_to_docstring(
     doc, instructions, no_doc_str, suffix_str, notice):
-  """Adds a deprecation notice to a docstring."""
+  """Adds a deprecation notice to a docstring.
+
+  Args:
+    doc: The original docstring.
+    instructions: A string, describing how to fix the problem.
+    no_doc_str: The default value to use for `doc` if `doc` is empty.
+    suffix_str: Is added to the end of the first line.
+    notice: A list of strings. The main notice warning body.
+
+  Returns:
+    A new docstring, with the notice attached.
+
+  Raises:
+    ValueError: If `notice` is empty.
+  """
   if not doc:
     lines = [no_doc_str]
   else:
     lines = _normalize_docstring(doc).splitlines()
     lines[0] += ' ' + suffix_str
 
-  notice = [''] + notice + [instructions]
+  if not notice:
+    raise ValueError('The `notice` arg must not be empty.')
+
+  notice[0] = 'Warning: ' + notice[0]
+  notice = [''] + notice + ([instructions] if instructions else [])
 
   if len(lines) > 1:
     # Make sure that we keep our distance from the main body
@@ -125,3 +143,53 @@ class classproperty(object):  # pylint: disable=invalid-name
 
   def __get__(self, owner_self, owner_cls):
     return self._func(owner_cls)
+
+
+class _CachedClassProperty(object):
+  """Cached class property decorator.
+
+  Transforms a class method into a property whose value is computed once
+  and then cached as a normal attribute for the life of the class.  Example
+  usage:
+
+  >>> class MyClass(object):
+  ...   @cached_classproperty
+  ...   def value(cls):
+  ...     print("Computing value")
+  ...     return '<property of %s>' % cls.__name__
+  >>> class MySubclass(MyClass):
+  ...   pass
+  >>> MyClass.value
+  Computing value
+  '<property of MyClass>'
+  >>> MyClass.value  # uses cached value
+  '<property of MyClass>'
+  >>> MySubclass.value
+  Computing value
+  '<property of MySubclass>'
+
+  This decorator is similar to `functools.cached_property`, but it adds a
+  property to the class, not to individual instances.
+  """
+
+  def __init__(self, func):
+    self._func = func
+    self._cache = {}
+
+  def __get__(self, obj, objtype):
+    if objtype not in self._cache:
+      self._cache[objtype] = self._func(objtype)
+    return self._cache[objtype]
+
+  def __set__(self, obj, value):
+    raise AttributeError('property %s is read-only' % self._func.__name__)
+
+  def __delete__(self, obj):
+    raise AttributeError('property %s is read-only' % self._func.__name__)
+
+
+def cached_classproperty(func):
+  return _CachedClassProperty(func)
+
+
+cached_classproperty.__doc__ = _CachedClassProperty.__doc__

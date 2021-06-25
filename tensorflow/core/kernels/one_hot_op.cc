@@ -17,9 +17,10 @@ limitations under the License.
 
 #define EIGEN_USE_THREADS
 
-#if GOOGLE_CUDA
+#if (defined(GOOGLE_CUDA) && GOOGLE_CUDA) || \
+    (defined(TENSORFLOW_USE_ROCM) && TENSORFLOW_USE_ROCM)
 #define EIGEN_USE_GPU
-#endif  // GOOGLE_CUDA
+#endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
 #include "tensorflow/core/kernels/one_hot_op.h"
 
@@ -33,6 +34,7 @@ limitations under the License.
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
+#include "tensorflow/core/util/overflow.h"
 
 namespace tensorflow {
 
@@ -78,12 +80,12 @@ class OneHotOp : public OpKernel {
     OP_REQUIRES(
         ctx, depth_v >= 0,
         errors::InvalidArgument("depth must be non-negative, got: ", depth_v));
-    // Tensor can't have more than 2^40 elements.
     OP_REQUIRES(
-        ctx, indices_shape.num_elements() * depth_v < kMaxElements,
-        errors::InvalidArgument(strings::StrCat(
-            "OneHot result would exceed the maximum number of elements (",
-            kMaxElements, ")")));
+        ctx,
+        MultiplyWithoutOverflow(indices_shape.num_elements(), depth_v) >= 0,
+        errors::InvalidArgument("OneHot result would have shape ",
+                                indices_shape.DebugString(), " + [", depth_v,
+                                "], which exceeds 2**63 - 1 elements"));
 
     TensorShape output_shape = indices_shape;
     output_shape.InsertDim(axis, depth_v);
@@ -102,7 +104,7 @@ class OneHotOp : public OpKernel {
       for (int i = 0; i < axis; ++i) {
         prefix_dim_size *= indices_shape.dim_size(i);
       }
-      TI suffix_dim_size = indices_shape.num_elements() / prefix_dim_size;
+      int64 suffix_dim_size = indices_shape.num_elements() / prefix_dim_size;
 
       // Split indices into matrix of size prefix_dim_size x suffix_dim_size
       auto indices_t =
@@ -139,7 +141,8 @@ class OneHotOp : public OpKernel {
 
 TF_CALL_ALL_TYPES(REGISTER_ONE_HOT);
 
-#if GOOGLE_CUDA
+#if (defined(GOOGLE_CUDA) && GOOGLE_CUDA) || \
+    (defined(TENSORFLOW_USE_ROCM) && TENSORFLOW_USE_ROCM)
 
 // Forward declarations of the functor specializations for GPU.
 namespace functor {
@@ -157,7 +160,9 @@ namespace functor {
   DECLARE_GPU_SPEC_INDEX(T, int32); \
   DECLARE_GPU_SPEC_INDEX(T, int64);
 
-TF_CALL_GPU_NUMBER_TYPES(DECLARE_GPU_SPEC);
+TF_CALL_int32(DECLARE_GPU_SPEC);
+TF_CALL_int64(DECLARE_GPU_SPEC);
+TF_CALL_GPU_ALL_TYPES(DECLARE_GPU_SPEC);
 
 #undef DECLARE_GPU_SPEC_INDEX
 #undef DECLARE_GPU_SPEC
@@ -178,11 +183,13 @@ TF_CALL_GPU_NUMBER_TYPES(DECLARE_GPU_SPEC);
   REGISTER_ONE_HOT_GPU_INDEX(type, int32); \
   REGISTER_ONE_HOT_GPU_INDEX(type, int64);
 
-TF_CALL_GPU_NUMBER_TYPES(REGISTER_ONE_HOT_GPU);
+TF_CALL_int32(REGISTER_ONE_HOT_GPU);
+TF_CALL_int64(REGISTER_ONE_HOT_GPU);
+TF_CALL_GPU_ALL_TYPES(REGISTER_ONE_HOT_GPU);
 
 #undef REGISTER_ONE_HOT_GPU_INDEX
 #undef REGISTER_ONE_HOT_GPU
 
-#endif  // GOOGLE_CUDA
+#endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
 }  // namespace tensorflow

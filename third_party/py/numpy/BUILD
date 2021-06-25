@@ -5,14 +5,12 @@ package(default_visibility = ["//visibility:public"])
 py_library(
     name = "numpy",
     srcs = ["tf_numpy_dummy.py"],
-    srcs_version = "PY2AND3",
+    srcs_version = "PY3",
 )
 
-cc_library(
+alias(
     name = "headers",
-    hdrs = glob(["numpy_include/**/*.h"]),
-    data = ["//util/python:python_checked"],
-    includes = ["numpy_include"],
+    actual = "@local_config_python//:numpy_headers",
 )
 
 genrule(

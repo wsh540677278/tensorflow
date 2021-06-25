@@ -20,18 +20,33 @@ limitations under the License.
 
 #include <type_traits>
 
+#include "absl/strings/string_view.h"
+#include "tensorflow/compiler/xla/status_macros.h"
+#include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 
 namespace xla {
 namespace primitive_util {
 
+// Returns the count of significand (mantissa) bits for float datatypes.
+// For non-float datatypes, results in a LOG(FATAL).
+int SignificandWidth(PrimitiveType type);
+
+// Returns the count of exponent bits for float datatypes.
+// For non-float datatypes, results in a LOG(FATAL).
+int ExponentWidth(PrimitiveType type);
+
+// Returns the exponent of the smallest number which cannot be represented.
+// For non-float datatypes, results in a LOG(FATAL).
+int OverflowExponent(PrimitiveType type);
+
 // Returns the XLA primitive type (eg, F32) corresponding to the given
 // template parameter native type (eg, float).
 template <typename NativeT>
 PrimitiveType NativeToPrimitiveType() {
   // Make the expression depend on the template parameter NativeT so
-  // that this compile-time error only apperas if this function is
+  // that this compile-time error only appears if this function is
   // instantiated with some concrete type that is not specialized
   // below.
   static_assert(!std::is_same<NativeT, NativeT>::value,
@@ -40,43 +55,90 @@ PrimitiveType NativeToPrimitiveType() {
 }
 
 // Declarations of specializations for each native type which correspond to a
-// XLA primitive type.
+// XLA primitive type.  As an optimization, these are declared inline in the
+// header.
 template <>
-PrimitiveType NativeToPrimitiveType<bool>();
+inline PrimitiveType NativeToPrimitiveType<bool>() {
+  return PRED;
+}
 
 // Unsigned integer
 template <>
-PrimitiveType NativeToPrimitiveType<uint8>();
+inline PrimitiveType NativeToPrimitiveType<uint8>() {
+  return U8;
+}
 
 template <>
-PrimitiveType NativeToPrimitiveType<uint16>();
+inline PrimitiveType NativeToPrimitiveType<uint16>() {
+  return U16;
+}
 
 template <>
-PrimitiveType NativeToPrimitiveType<uint32>();
+inline PrimitiveType NativeToPrimitiveType<uint32>() {
+  return U32;
+}
 
 template <>
-PrimitiveType NativeToPrimitiveType<uint64>();
+inline PrimitiveType NativeToPrimitiveType<uint64>() {
+  return U64;
+}
 
 // Signed integer
 template <>
-PrimitiveType NativeToPrimitiveType<int8>();
+inline PrimitiveType NativeToPrimitiveType<int8>() {
+  return S8;
+}
 
 template <>
-PrimitiveType NativeToPrimitiveType<int16>();
+inline PrimitiveType NativeToPrimitiveType<int16>() {
+  return S16;
+}
 
 template <>
-PrimitiveType NativeToPrimitiveType<int32>();
+inline PrimitiveType NativeToPrimitiveType<int32>() {
+  return S32;
+}
 
 template <>
-PrimitiveType NativeToPrimitiveType<int64>();
+inline PrimitiveType NativeToPrimitiveType<int64>() {
+  return S64;
+}
 
 // Floating point
 template <>
-PrimitiveType NativeToPrimitiveType<float>();
+inline PrimitiveType NativeToPrimitiveType<float>() {
+  return F32;
+}
+
 template <>
-PrimitiveType NativeToPrimitiveType<double>();
+inline PrimitiveType NativeToPrimitiveType<double>() {
+  return F64;
+}
+
+template <>
+inline PrimitiveType NativeToPrimitiveType<half>() {
+  return F16;
+}
+
+template <>
+inline PrimitiveType NativeToPrimitiveType<bfloat16>() {
+  return BF16;
+}
+
+// Complex
+template <>
+inline PrimitiveType NativeToPrimitiveType<complex64>() {
+  return C64;
+}
+
+template <>
+inline PrimitiveType NativeToPrimitiveType<complex128>() {
+  return C128;
+}
 
 bool IsFloatingPointType(PrimitiveType type);
+
+bool IsComplexType(PrimitiveType type);
 
 bool IsSignedIntegralType(PrimitiveType type);
 
@@ -84,8 +146,53 @@ bool IsUnsignedIntegralType(PrimitiveType type);
 
 bool IsIntegralType(PrimitiveType type);
 
+// Returns true if values of the given primitive type are held in array shapes.
+bool IsArrayType(PrimitiveType primitive_type);
+
 // Returns the number of bits in the representation for a given type.
 int BitWidth(PrimitiveType type);
+
+// Returns the number of bytes in the representation for a given type.
+int ByteWidth(PrimitiveType type);
+
+PrimitiveType UnsignedIntegralTypeForBitWidth(int64 src_bitwidth);
+
+PrimitiveType SignedIntegralTypeForBitWidth(int64 src_bitwidth);
+
+// Returns the real, imag component type underlying the given complex type.
+// LOG(FATAL)'s if complex_type is not complex.
+PrimitiveType ComplexComponentType(PrimitiveType complex_type);
+
+// Returns the higher-precision element type if a and b are both floating
+// point types; otherwise, checks that they have the same element type
+// and returns it.
+inline PrimitiveType HigherPrecisionType(PrimitiveType a, PrimitiveType b) {
+  // Returns a tuple where the elements are lexicographically ordered in terms
+  // of importance.
+  auto type_properties = [](PrimitiveType type) {
+    return std::make_tuple(
+        // Prefer floating point types with more range over other
+        // floating-point types or non-floating point types.
+        IsFloatingPointType(type) ? OverflowExponent(type) : -1,
+        // Prefer floating point types with more precision over less precise
+        // types.
+        IsFloatingPointType(type) ? SignificandWidth(type) : -1,
+        // Prefer wider types over narrower types.
+        BitWidth(type),
+        // Prefer signed integer types over unsigned integer types.
+        IsSignedIntegralType(type));
+  };
+  auto a_properties = type_properties(a);
+  auto b_properties = type_properties(b);
+  if (a_properties > b_properties) {
+    return a;
+  }
+  if (b_properties > a_properties) {
+    return b;
+  }
+  CHECK_EQ(a, b);
+  return a;
+}
 
 // Returns the native type (eg, float) corresponding to the given template
 // parameter XLA primitive type (eg, F32).
@@ -150,6 +257,36 @@ template <>
 struct PrimitiveTypeToNative<F64> {
   using type = double;
 };
+template <>
+struct PrimitiveTypeToNative<F16> {
+  using type = half;
+};
+
+template <>
+struct PrimitiveTypeToNative<BF16> {
+  using type = bfloat16;
+};
+
+// Complex
+template <>
+struct PrimitiveTypeToNative<C64> {
+  using type = complex64;
+};
+
+template <>
+struct PrimitiveTypeToNative<C128> {
+  using type = complex128;
+};
+
+// Returns the lower-case name of the given primitive type.
+const string& LowercasePrimitiveTypeName(PrimitiveType s);
+
+// Returns the PrimitiveType matching the given name. The given name is expected
+// to be lower-case.
+StatusOr<PrimitiveType> StringToPrimitiveType(absl::string_view name);
+
+// Returns true if the given name is a primitive type string (lower-case).
+bool IsPrimitiveTypeName(absl::string_view name);
 
 }  // namespace primitive_util
 }  // namespace xla

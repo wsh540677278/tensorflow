@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_COMMON_RUNTIME_SESSION_FACTORY_H_
-#define TENSORFLOW_COMMON_RUNTIME_SESSION_FACTORY_H_
+#ifndef TENSORFLOW_CORE_COMMON_RUNTIME_SESSION_FACTORY_H_
+#define TENSORFLOW_CORE_COMMON_RUNTIME_SESSION_FACTORY_H_
 
 #include <string>
 
@@ -30,7 +30,12 @@ struct SessionOptions;
 
 class SessionFactory {
  public:
-  virtual Session* NewSession(const SessionOptions& options) = 0;
+  // Creates a new session and stores it in *out_session, or fails with an error
+  // status if the Session could not be created. Caller takes ownership of
+  // *out_session if this returns Status::OK().
+  virtual Status NewSession(const SessionOptions& options,
+                            Session** out_session) = 0;
+
   virtual bool AcceptsOptions(const SessionOptions& options) = 0;
 
   // Abort and close all existing sessions, disconnecting their resources from
@@ -47,7 +52,7 @@ class SessionFactory {
   // Old sessions may continue to have side-effects on resources not in
   // containers listed in "containers", and thus may affect future
   // sessions' results in ways that are hard to predict.  Thus, if well-defined
-  // behaviour is desired, is it recommended that all containers be listed in
+  // behavior is desired, is it recommended that all containers be listed in
   // "containers".
   //
   // If the "containers" vector is empty, the default container is assumed.
@@ -68,4 +73,4 @@ class SessionFactory {
 
 }  // namespace tensorflow
 
-#endif  // TENSORFLOW_COMMON_RUNTIME_SESSION_FACTORY_H_
+#endif  // TENSORFLOW_CORE_COMMON_RUNTIME_SESSION_FACTORY_H_

@@ -30,6 +30,7 @@ class TransposeOp : public OpKernel {
  protected:
   virtual Status DoTranspose(OpKernelContext* ctx, const Tensor& in,
                              gtl::ArraySlice<int32> perm, Tensor* out) = 0;
+  virtual bool IsConjugate() const { return false; }
 };
 
 class TransposeCpuOp : public TransposeOp {
@@ -41,7 +42,7 @@ class TransposeCpuOp : public TransposeOp {
                      gtl::ArraySlice<int32> perm, Tensor* out) override;
 };
 
-#ifdef INTEL_MKL
+#if defined(INTEL_MKL)
 class MklTransposeCpuOp : public TransposeOp {
  public:
   explicit MklTransposeCpuOp(OpKernelConstruction* ctx) : TransposeOp(ctx) {}
@@ -61,16 +62,43 @@ class TransposeGpuOp : public TransposeOp {
                      gtl::ArraySlice<int32> perm, Tensor* out) override;
 };
 
-#ifdef TENSORFLOW_USE_SYCL
-class TransposeSyclOp : public TransposeOp {
+
+// Conjugating transpose ops.
+class ConjugateTransposeCpuOp : public TransposeOp {
  public:
-  explicit TransposeSyclOp(OpKernelConstruction* ctx) : TransposeOp(ctx) {}
+  explicit ConjugateTransposeCpuOp(OpKernelConstruction* ctx)
+      : TransposeOp(ctx) {}
 
  protected:
   Status DoTranspose(OpKernelContext* ctx, const Tensor& in,
                      gtl::ArraySlice<int32> perm, Tensor* out) override;
+  bool IsConjugate() const override { return true; }
 };
-#endif // TENSORFLOW_USE_SYCL
+
+#if defined(INTEL_MKL)
+class MklConjugateTransposeCpuOp : public TransposeOp {
+ public:
+  explicit MklConjugateTransposeCpuOp(OpKernelConstruction* ctx)
+      : TransposeOp(ctx) {}
+
+ protected:
+  Status DoTranspose(OpKernelContext* ctx, const Tensor& in,
+                     gtl::ArraySlice<int32> perm, Tensor* out) override;
+  bool IsConjugate() const override { return true; }
+};
+#endif  // INTEL_MKL
+
+class ConjugateTransposeGpuOp : public TransposeOp {
+ public:
+  explicit ConjugateTransposeGpuOp(OpKernelConstruction* ctx)
+      : TransposeOp(ctx) {}
+
+ protected:
+  Status DoTranspose(OpKernelContext* ctx, const Tensor& in,
+                     gtl::ArraySlice<int32> perm, Tensor* out) override;
+  bool IsConjugate() const override { return true; }
+};
+
 
 }  // namespace tensorflow
 

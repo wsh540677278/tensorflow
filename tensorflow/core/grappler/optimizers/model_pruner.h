@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_GRAPPLER_OPTIMIZERS_MODEL_PRUNER_H_
-#define TENSORFLOW_GRAPPLER_OPTIMIZERS_MODEL_PRUNER_H_
+#ifndef TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_MODEL_PRUNER_H_
+#define TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_MODEL_PRUNER_H_
 
 #include "tensorflow/core/grappler/optimizers/graph_optimizer.h"
 
@@ -22,7 +22,7 @@ namespace tensorflow {
 namespace grappler {
 
 // Prune a model to make it more efficient:
-// * Remove unecessary operations.
+// * Remove unnecessary operations.
 // * Optimize gradient computations.
 class ModelPruner : public GraphOptimizer {
  public:
@@ -31,14 +31,13 @@ class ModelPruner : public GraphOptimizer {
 
   string name() const override { return "model_pruner"; };
 
-  Status Optimize(Cluster* cluster, const GrapplerItem& item,
-                  GraphDef* output) override;
+  bool UsesFunctionLibrary() const override { return false; }
 
-  void Feedback(Cluster* cluster, const GrapplerItem& item,
-                const GraphDef& optimize_output, double result) override;
+  Status Optimize(Cluster* cluster, const GrapplerItem& item,
+                  GraphDef* optimized_graph) override;
 };
 
 }  // end namespace grappler
 }  // end namespace tensorflow
 
-#endif  // TENSORFLOW_GRAPPLER_OPTIMIZERS_MODEL_PRUNER_H_
+#endif  // TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_MODEL_PRUNER_H_

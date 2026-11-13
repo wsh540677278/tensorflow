@@ -14,23 +14,19 @@
 # ==============================================================================
 """Tests for tf.dynamic_stitch."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import numpy as np
 
-from tensorflow.compiler.tests.xla_test import XLATestCase
+from tensorflow.compiler.tests import xla_test
 from tensorflow.python.framework import dtypes
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import data_flow_ops
 from tensorflow.python.platform import googletest
 
 
-class DynamicStitchTest(XLATestCase):
+class DynamicStitchTest(xla_test.XLATestCase):
 
   def _AssertDynamicStitchResultIs(self, indices, data, expected):
-    with self.test_session() as session:
+    with self.session() as session:
       index_placeholders = [
           array_ops.placeholder(dtypes.as_dtype(arg.dtype)) for arg in indices
       ]
@@ -58,6 +54,15 @@ class DynamicStitchTest(XLATestCase):
         [idx1, idx2], [val1, val2],
         expected=np.array([[], [], [], []], np.int32))
 
+  def testEmptyIndex(self):
+    idx1 = np.array([], dtype=np.int32)
+    idx2 = np.array([[], []], dtype=np.int32)
+    val1 = np.ndarray(shape=(0, 9), dtype=np.int32)
+    val2 = np.ndarray(shape=(2, 0, 9), dtype=np.int32)
+    self._AssertDynamicStitchResultIs([idx1, idx2], [val1, val2],
+                                      expected=np.ndarray(
+                                          shape=(0, 9), dtype=np.int32))
+
   def testSimple1D(self):
     val1 = np.array([0, 4, 7], dtype=np.int32)
     val2 = np.array([1, 6, 2, 3, 5], dtype=np.int32)
@@ -66,6 +71,12 @@ class DynamicStitchTest(XLATestCase):
     expected = np.array([0, 10, 20, 30, 40, 50, 60, 70], dtype=np.float32)
     self._AssertDynamicStitchResultIs(
         [val1, val2], [val3, val4], expected=expected)
+
+  def testMissingIndicesZeroFilled(self):
+    idx = np.array([4, 4, 4, 4], dtype=np.int32)
+    data = np.array([1, 2, 3, 4], dtype=np.int32)
+    expected = np.array([0, 0, 0, 0, 4], dtype=np.int32)
+    self._AssertDynamicStitchResultIs([idx], [data], expected=expected)
 
   def testSimple2D(self):
     val1 = np.array([0, 4, 7], dtype=np.int32)

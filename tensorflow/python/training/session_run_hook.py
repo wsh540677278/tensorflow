@@ -28,7 +28,7 @@ ops-or-tensor/feeds to the run call, and when the run call finishes with success
 gets the outputs it requested. Hooks are allowed to add ops to the graph in
 `hook.begin()`. The graph is finalized after the `begin()` method is called.
 
-There are a few pre-defined monitors:
+There are a few pre-defined hooks:
  - StopAtStepHook: Request stop based on global_step
  - CheckpointSaverHook: saves checkpoint
  - LoggingTensorHook: outputs one or more tensor values to log
@@ -42,33 +42,38 @@ For more specific needs, you can create custom hooks:
       print('Starting the session.')
       self.your_tensor = ...
 
-    def end(self, session):
-      print('Done with the session.')
+    def after_create_session(self, session, coord):
+      # When this is called, the graph is finalized and
+      # ops can no longer be added to the graph.
+      print('Session created.')
 
     def before_run(self, run_context):
-      print('before calling session.run)
+      print('Before calling session.run().')
       return SessionRunArgs(self.your_tensor)
 
-    def after_run(self, run_context, run_values)
+    def after_run(self, run_context, run_values):
       print('Done running one step. The value of my tensor: %s',
             run_values.results)
       if you-need-to-stop-loop:
         run_context.request_stop()
 
+    def end(self, session):
+      print('Done with the session.')
+
 To understand how hooks interact with calls to `MonitoredSession.run()`,
 look at following code:
-  with SupervisedSession(hooks=your_hooks, ...) as sess
-    while not sess.should_stop()
+  with MonitoredTrainingSession(hooks=your_hooks, ...) as sess:
+    while not sess.should_stop():
       sess.run(your_fetches)
 
 Above user code leads to following execution:
   call hooks.begin()
-  sess = tf.Session()
+  sess = tf.compat.v1.Session()
   call hooks.after_create_session()
   while not stop is requested:
     call hooks.before_run()
     try:
-      results = sess.run(merged_fetches)
+      results = sess.run(merged_fetches, feed_dict=merged_feeds)
     except (errors.OutOfRangeError, StopIteration):
       break
     call hooks.after_run()
@@ -79,21 +84,14 @@ Note that if sess.run() raises OutOfRangeError or StopIteration then
 hooks.after_run() will not be called but hooks.end() will still be called.
 If sess.run() raises any other exception then neither hooks.after_run() nor
 hooks.end() will be called.
-
-@@SessionRunHook
-@@SessionRunArgs
-@@SessionRunContext
-@@SessionRunValues
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import collections
+from tensorflow.python.util.tf_export import tf_export
 
 
-class SessionRunHook(object):
+@tf_export(v1=["train.SessionRunHook"])
+class SessionRunHook:
   """Hook to extend calls to MonitoredSession.run()."""
 
   def begin(self):
@@ -184,6 +182,7 @@ class SessionRunHook(object):
     pass
 
 
+@tf_export(v1=["train.SessionRunArgs"])
 class SessionRunArgs(
     collections.namedtuple("SessionRunArgs",
                            ["fetches", "feed_dict", "options"])):
@@ -208,7 +207,8 @@ class SessionRunArgs(
     return super(SessionRunArgs, cls).__new__(cls, fetches, feed_dict, options)
 
 
-class SessionRunContext(object):
+@tf_export(v1=["train.SessionRunContext"])
+class SessionRunContext:
   """Provides information about the `session.run()` call being made.
 
   Provides information about original request to `Session.Run()` function.
@@ -259,6 +259,7 @@ class SessionRunContext(object):
     self._stop_requested = True
 
 
+@tf_export(v1=["train.SessionRunValues"])
 class SessionRunValues(
     collections.namedtuple("SessionRunValues",
                            ["results", "options", "run_metadata"])):

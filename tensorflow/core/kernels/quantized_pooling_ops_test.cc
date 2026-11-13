@@ -13,10 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/core/kernels/quantization_utils.h"
+#define EIGEN_USE_THREADS
+
 #include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/fake_input.h"
-#include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/node_def_builder.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -25,6 +25,7 @@ limitations under the License.
 #include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/kernels/ops_testutil.h"
 #include "tensorflow/core/kernels/ops_util.h"
+#include "tensorflow/core/kernels/quantization_utils.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/platform/test.h"
 
@@ -68,8 +69,8 @@ TEST_F(QuantizedPoolingTest, SmallAveragePooling) {
 
   AddInputFromArray<quint8>(input_quantized.shape(),
                             input_quantized.flat<quint8>());
-  AddInputFromArray<float>(TensorShape({1}), {input_min});
-  AddInputFromArray<float>(TensorShape({1}), {input_max});
+  AddInputFromArray<float>(TensorShape({}), {input_min});
+  AddInputFromArray<float>(TensorShape({}), {input_max});
   TF_ASSERT_OK(RunOpKernel());
   const Tensor& output_quantized = *GetOutput(0);
   const float output_min = GetOutput(1)->flat<float>()(0);
@@ -113,8 +114,8 @@ TEST_F(QuantizedPoolingTest, SmallMaxPooling) {
 
   AddInputFromArray<quint8>(input_quantized.shape(),
                             input_quantized.flat<quint8>());
-  AddInputFromArray<float>(TensorShape({1}), {input_min});
-  AddInputFromArray<float>(TensorShape({1}), {input_max});
+  AddInputFromArray<float>(TensorShape({}), {input_min});
+  AddInputFromArray<float>(TensorShape({}), {input_max});
   TF_ASSERT_OK(RunOpKernel());
   const Tensor& output_quantized = *GetOutput(0);
   const float output_min = GetOutput(1)->flat<float>()(0);

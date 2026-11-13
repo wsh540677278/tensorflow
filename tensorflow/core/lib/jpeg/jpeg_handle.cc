@@ -24,7 +24,11 @@ limitations under the License.
 #include <setjmp.h>
 #include <stddef.h>
 
-#include "tensorflow/core/platform/logging.h"
+#include "absl/log/log.h"
+#include "jpeglib.h"  // from @libjpeg_turbo
+#include "tensorflow/core/platform/jpeg.h"
+#include "tensorflow/core/platform/logging.h"  // IWYU pragma: keep
+#include "tensorflow/core/platform/tstring.h"
 
 namespace tensorflow {
 namespace jpeg {
@@ -79,14 +83,14 @@ void MemTermDestination(j_compress_ptr cinfo) {
 
 // -----------------------------------------------------------------------------
 void SetDest(j_compress_ptr cinfo, void *buffer, int bufsize) {
-  SetDest(cinfo, buffer, bufsize, NULL);
+  SetDest(cinfo, buffer, bufsize, nullptr);
 }
 
 // -----------------------------------------------------------------------------
 void SetDest(j_compress_ptr cinfo, void *buffer, int bufsize,
-             string *destination) {
+             tstring *destination) {
   MemDestMgr *dest;
-  if (cinfo->dest == NULL) {
+  if (cinfo->dest == nullptr) {
     cinfo->dest = reinterpret_cast<struct jpeg_destination_mgr *>(
         (*cinfo->mem->alloc_small)(reinterpret_cast<j_common_ptr>(cinfo),
                                    JPOOL_PERMANENT, sizeof(MemDestMgr)));
@@ -177,7 +181,7 @@ void SetSrc(j_decompress_ptr cinfo, const void *data,
   src->data = reinterpret_cast<const unsigned char *>(data);
   src->datasize = datasize;
   src->pub.bytes_in_buffer = 0;
-  src->pub.next_input_byte = NULL;
+  src->pub.next_input_byte = nullptr;
   src->try_recover_truncated_jpeg = try_recover_truncated_jpeg;
 }
 

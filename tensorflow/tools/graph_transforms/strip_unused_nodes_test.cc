@@ -18,6 +18,7 @@ limitations under the License.
 #include "tensorflow/cc/ops/nn_ops.h"
 #include "tensorflow/cc/ops/sendrecv_ops.h"
 #include "tensorflow/cc/ops/standard_ops.h"
+#include "tensorflow/core/framework/tensor_shape.pb.h"
 #include "tensorflow/core/framework/tensor_testutil.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/platform/test.h"
@@ -29,9 +30,9 @@ namespace tensorflow {
 namespace graph_transforms {
 
 // Declare here, so we don't need a public header.
-Status StripUnusedNodes(const GraphDef& input_graph_def,
-                        const TransformFuncContext& context,
-                        GraphDef* output_graph_def);
+absl::Status StripUnusedNodes(const GraphDef& input_graph_def,
+                              const TransformFuncContext& context,
+                              GraphDef* output_graph_def);
 
 class StripUnusedNodesTest : public ::testing::Test {
  protected:
@@ -58,7 +59,7 @@ class StripUnusedNodesTest : public ::testing::Test {
     GraphDef result;
     TF_ASSERT_OK(StripUnusedNodes(graph_def, {{}, {"add_node"}}, &result));
 
-    std::map<string, const NodeDef*> node_lookup;
+    std::map<std::string, const NodeDef*> node_lookup;
     MapNamesToNodes(result, &node_lookup);
     EXPECT_EQ(1, node_lookup.count("add_node"));
     EXPECT_EQ(1, node_lookup.count("a_node"));
@@ -113,7 +114,7 @@ class StripUnusedNodesTest : public ::testing::Test {
     TF_ASSERT_OK(StripUnusedNodes(
         graph_def, {{"dangling_input"}, {"add_node1"}}, &result));
 
-    std::map<string, const NodeDef*> node_lookup;
+    std::map<std::string, const NodeDef*> node_lookup;
     MapNamesToNodes(result, &node_lookup);
     EXPECT_EQ(1, node_lookup.count("add_node1"));
     EXPECT_EQ(1, node_lookup.count("add_node2"));
@@ -156,7 +157,7 @@ class StripUnusedNodesTest : public ::testing::Test {
     TF_ASSERT_OK(
         StripUnusedNodes(graph_def, {{"mul_node"}, {"add_node"}}, &result));
 
-    std::map<string, const NodeDef*> node_lookup;
+    std::map<std::string, const NodeDef*> node_lookup;
     MapNamesToNodes(result, &node_lookup);
     EXPECT_EQ(1, node_lookup.count("add_node"));
     EXPECT_EQ(1, node_lookup.count("mul_node"));
@@ -202,7 +203,7 @@ class StripUnusedNodesTest : public ::testing::Test {
                                    {{"type", {"int32"}}, {"shape", {"1,2,3"}}}},
                                   &result));
 
-    std::map<string, const NodeDef*> node_lookup;
+    std::map<std::string, const NodeDef*> node_lookup;
     MapNamesToNodes(result, &node_lookup);
     EXPECT_EQ(1, node_lookup.count("add_node"));
     EXPECT_EQ(1, node_lookup.count("mul_node"));
@@ -250,7 +251,7 @@ class StripUnusedNodesTest : public ::testing::Test {
                                     {"shape_for_name", {"1,2", "1, 2, 3"}}}},
                                   &result));
 
-    std::map<string, const NodeDef*> node_lookup;
+    std::map<std::string, const NodeDef*> node_lookup;
     MapNamesToNodes(result, &node_lookup);
     EXPECT_EQ(1, node_lookup.count("add_node"));
     EXPECT_EQ(1, node_lookup.count("mul_node"));

@@ -15,7 +15,6 @@ limitations under the License.
 
 #include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/fake_input.h"
-#include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/node_def_builder.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -54,10 +53,10 @@ TEST_F(RequantizeTest, HandCraftedRequantize) {
   // Requantize to -1 to 1.
   AddInputFromArray<qint32>(TensorShape({value_count}),
                             {-(1 << 23), 0, (1 << 23)});
-  AddInputFromArray<float>(TensorShape({1}), {-256.0f});
-  AddInputFromArray<float>(TensorShape({1}), {256.0f});
-  AddInputFromArray<float>(TensorShape({1}), {-1.0f});
-  AddInputFromArray<float>(TensorShape({1}), {1.0f});
+  AddInputFromArray<float>(TensorShape({}), {-256.0f});
+  AddInputFromArray<float>(TensorShape({}), {256.0f});
+  AddInputFromArray<float>(TensorShape({}), {-1.0f});
+  AddInputFromArray<float>(TensorShape({}), {1.0f});
   TF_ASSERT_OK(RunOpKernel());
   Tensor expected(allocator(), DT_QUINT8, TensorShape({value_count}));
   test::FillValues<quint8>(&expected, {0, 128, 255});
@@ -72,12 +71,12 @@ TEST_F(RequantizeTest, InvalidOutputMin) {
 
   AddInputFromArray<qint32>(TensorShape({value_count}),
                             {-(1 << 23), 0, (1 << 23)});
-  AddInputFromArray<float>(TensorShape({1}), {-256.0f});
-  AddInputFromArray<float>(TensorShape({1}), {256.0f});
-  AddInputFromArray<float>(TensorShape({1}), {0.01f});
-  AddInputFromArray<float>(TensorShape({1}), {1.0f});
+  AddInputFromArray<float>(TensorShape({}), {-256.0f});
+  AddInputFromArray<float>(TensorShape({}), {256.0f});
+  AddInputFromArray<float>(TensorShape({}), {0.01f});
+  AddInputFromArray<float>(TensorShape({}), {1.0f});
   EXPECT_EQ("requested_output_min must be <= 0, but got 0.01",
-            RunOpKernel().error_message());
+            RunOpKernel().message());
 }
 
 TEST_F(RequantizeTest, InvalidOutputMax) {
@@ -86,14 +85,14 @@ TEST_F(RequantizeTest, InvalidOutputMax) {
 
   AddInputFromArray<qint32>(TensorShape({value_count}),
                             {-(1 << 23), 0, (1 << 23)});
-  AddInputFromArray<float>(TensorShape({1}), {-256.0f});
-  AddInputFromArray<float>(TensorShape({1}), {256.0f});
-  AddInputFromArray<float>(TensorShape({1}), {-10.0f});
-  AddInputFromArray<float>(TensorShape({1}), {-11.0f});
+  AddInputFromArray<float>(TensorShape({}), {-256.0f});
+  AddInputFromArray<float>(TensorShape({}), {256.0f});
+  AddInputFromArray<float>(TensorShape({}), {-10.0f});
+  AddInputFromArray<float>(TensorShape({}), {-11.0f});
   EXPECT_EQ(
       "requested_output_max must be >= requested_output_min, but got -11 and "
       "-10",
-      RunOpKernel().error_message());
+      RunOpKernel().message());
 }
 
 }  // end namespace tensorflow

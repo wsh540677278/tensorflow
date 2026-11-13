@@ -26,8 +26,12 @@ limitations under the License.
 #include <assert.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
+#include "absl/log/check.h"
+#include "tensorflow/core/lib/math/math_util.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/mem.h"
@@ -44,13 +48,13 @@ namespace core {
 Arena::Arena(const size_t block_size)
     : remaining_(0),
       block_size_(block_size),
-      freestart_(NULL),  // set for real in Reset()
+      freestart_(nullptr),  // set for real in Reset()
       blocks_alloced_(1),
-      overflow_blocks_(NULL) {
+      overflow_blocks_(nullptr) {
   assert(block_size > kDefaultAlignment);
 
-  first_blocks_[0].mem =
-      reinterpret_cast<char*>(port::AlignedMalloc(block_size_, sizeof(void*)));
+  first_blocks_[0].mem = reinterpret_cast<char*>(tsl::port::AlignedMalloc(
+      block_size_, static_cast<std::align_val_t>(sizeof(void*))));
 
   first_blocks_[0].size = block_size_;
 
@@ -59,7 +63,7 @@ Arena::Arena(const size_t block_size)
 
 Arena::~Arena() {
   FreeBlocks();
-  assert(overflow_blocks_ == NULL);  // FreeBlocks() should do that
+  assert(overflow_blocks_ == nullptr);  // FreeBlocks() should do that
   // The first X blocks stay allocated always by default.  Delete them now.
   for (size_t i = 0; i < blocks_alloced_; ++i) {
     port::AlignedFree(first_blocks_[i].mem);
@@ -106,31 +110,18 @@ void Arena::Reset() {
 //    data.
 // ----------------------------------------------------------------------
 
-void Arena::MakeNewBlock(const uint32 alignment) {
+void Arena::MakeNewBlock(const uint32_t alignment) {
   AllocatedBlock* block = AllocNewBlock(block_size_, alignment);
   freestart_ = block->mem;
   remaining_ = block->size;
   CHECK(SatisfyAlignment(alignment));
 }
 
-// The following simple numeric routines also exist in util/math/mathutil.h
-// but we don't want to depend on that library.
-
-// Euclid's algorithm for Greatest Common Denominator.
-static uint32 GCD(uint32 x, uint32 y) {
-  while (y != 0) {
-    uint32 r = x % y;
-    x = y;
-    y = r;
-  }
-  return x;
-}
-
-static uint32 LeastCommonMultiple(uint32 a, uint32 b) {
+static uint32_t LeastCommonMultiple(uint32_t a, uint32_t b) {
   if (a > b) {
-    return (a / GCD(a, b)) * b;
+    return (a / MathUtil::GCD<uint32_t>(a, b)) * b;
   } else if (a < b) {
-    return (b / GCD(b, a)) * a;
+    return (b / MathUtil::GCD<uint32_t>(b, a)) * a;
   } else {
     return a;
   }
@@ -145,14 +136,14 @@ static uint32 LeastCommonMultiple(uint32 a, uint32 b) {
 // -------------------------------------------------------------
 
 Arena::AllocatedBlock* Arena::AllocNewBlock(const size_t block_size,
-                                            const uint32 alignment) {
+                                            const uint32_t alignment) {
   AllocatedBlock* block;
   // Find the next block.
   if (blocks_alloced_ < TF_ARRAYSIZE(first_blocks_)) {
     // Use one of the pre-allocated blocks
     block = &first_blocks_[blocks_alloced_++];
   } else {  // oops, out of space, move to the vector
-    if (overflow_blocks_ == NULL)
+    if (overflow_blocks_ == nullptr)
       overflow_blocks_ = new std::vector<AllocatedBlock>;
     // Adds another block to the vector.
     overflow_blocks_->resize(overflow_blocks_->size() + 1);
@@ -166,29 +157,29 @@ Arena::AllocatedBlock* Arena::AllocNewBlock(const size_t block_size,
 
   // Must be a multiple of kDefaultAlignment, unless requested
   // alignment is 1, in which case we don't care at all.
-  uint32 adjusted_alignment =
+  uint32_t adjusted_alignment =
       (alignment > 1 ? LeastCommonMultiple(alignment, kDefaultAlignment) : 1);
   // Required minimum alignment for port::AlignedMalloc().
   adjusted_alignment =
-      std::max(adjusted_alignment, static_cast<uint32>(sizeof(void*)));
+      std::max(adjusted_alignment, static_cast<uint32_t>(sizeof(void*)));
 
-  CHECK_LE(adjusted_alignment, static_cast<uint32>(1 << 20))
+  CHECK_LE(adjusted_alignment, static_cast<uint32_t>(1 << 20))
       << "Alignment on boundaries greater than 1MB not supported.";
 
   // If block_size > alignment we force block_size to be a multiple
   // of alignment; if block_size < alignment we make no adjustment.
   size_t adjusted_block_size = block_size;
   if (adjusted_block_size > adjusted_alignment) {
-    const uint32 excess = adjusted_block_size % adjusted_alignment;
+    const uint32_t excess = adjusted_block_size % adjusted_alignment;
     adjusted_block_size += (excess > 0 ? adjusted_alignment - excess : 0);
   }
-  block->mem = reinterpret_cast<char*>(
-      port::AlignedMalloc(adjusted_block_size, adjusted_alignment));
+  block->mem = reinterpret_cast<char*>(tsl::port::AlignedMalloc(
+      adjusted_block_size, static_cast<std::align_val_t>(adjusted_alignment)));
   block->size = adjusted_block_size;
-  CHECK(NULL != block->mem) << "block_size=" << block_size
-                            << " adjusted_block_size=" << adjusted_block_size
-                            << " alignment=" << alignment
-                            << " adjusted_alignment=" << adjusted_alignment;
+  CHECK(nullptr != block->mem) << "block_size=" << block_size
+                               << " adjusted_block_size=" << adjusted_block_size
+                               << " alignment=" << alignment
+                               << " adjusted_alignment=" << adjusted_alignment;
 
   return block;
 }
@@ -205,7 +196,7 @@ Arena::AllocatedBlock* Arena::AllocNewBlock(const size_t block_size,
 
 void* Arena::GetMemoryFallback(const size_t size, const int alignment) {
   if (0 == size) {
-    return NULL;  // stl/stl_alloc.h says this is okay
+    return nullptr;  // stl/stl_alloc.h says this is okay
   }
 
   // alignment must be a positive power of 2.
@@ -244,19 +235,19 @@ void* Arena::GetMemoryFallback(const size_t size, const int alignment) {
 // ----------------------------------------------------------------------
 
 void Arena::FreeBlocks() {
-  for (size_t i = 1; i < blocks_alloced_; ++i) {  // keep first block alloced
+  for (size_t i = 1; i < blocks_alloced_; ++i) {  // keep first block allocated
     port::AlignedFree(first_blocks_[i].mem);
-    first_blocks_[i].mem = NULL;
+    first_blocks_[i].mem = nullptr;
     first_blocks_[i].size = 0;
   }
   blocks_alloced_ = 1;
-  if (overflow_blocks_ != NULL) {
+  if (overflow_blocks_ != nullptr) {
     std::vector<AllocatedBlock>::iterator it;
     for (it = overflow_blocks_->begin(); it != overflow_blocks_->end(); ++it) {
       port::AlignedFree(it->mem);
     }
     delete overflow_blocks_;  // These should be used very rarely
-    overflow_blocks_ = NULL;
+    overflow_blocks_ = nullptr;
   }
 }
 

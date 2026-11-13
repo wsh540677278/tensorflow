@@ -14,10 +14,6 @@
 # ==============================================================================
 """Library for getting system information during TensorFlow tests."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import glob
 import multiprocessing
 import platform
@@ -81,7 +77,7 @@ def gather_cpu_info():
   # Gather num_cores_allowed
   try:
     with gfile.GFile('/proc/self/status', 'rb') as fh:
-      nc = re.search(r'(?m)^Cpus_allowed:\s*(.*)$', fh.read())
+      nc = re.search(r'(?m)^Cpus_allowed:\s*(.*)$', fh.read().decode('utf-8'))
     if nc:  # e.g. 'ff' => 8, 'fff' => 12
       cpu_info.num_cores_allowed = (
           bin(int(nc.group(1).replace(',', ''), 16)).count('1'))
@@ -96,7 +92,7 @@ def gather_cpu_info():
   cpu_info.cpu_info = info['brand']
   cpu_info.num_cores = info['count']
   cpu_info.mhz_per_cpu = info['hz_advertised_raw'][0] / 1.0e6
-  l2_cache_size = re.match(r'(\d+)', str(info['l2_cache_size']))
+  l2_cache_size = re.match(r'(\d+)', str(info.get('l2_cache_size', '')))
   if l2_cache_size:
     # If a value is returned, it's in KB
     cpu_info.cache_size['L2'] = int(l2_cache_size.group(0)) * 1024

@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_FRAMEWORK_NUMERIC_OP_H_
-#define TENSORFLOW_FRAMEWORK_NUMERIC_OP_H_
+#ifndef TENSORFLOW_CORE_FRAMEWORK_NUMERIC_OP_H_
+#define TENSORFLOW_CORE_FRAMEWORK_NUMERIC_OP_H_
 
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -101,8 +101,8 @@ class BinaryElementWiseOp : public BinaryOp<T> {
 #undef NDIM_CASE
 
       default:
-        context->SetStatus(errors::InvalidArgument(
-            "We only handle up to Tensor::dims() up to 8, not ", a.dims()));
+        context->SetStatus(absl::InvalidArgumentError(absl::StrCat(
+            "We only handle up to Tensor::dims() up to 8, not ", a.dims())));
         break;
     }
   }
@@ -110,4 +110,4 @@ class BinaryElementWiseOp : public BinaryOp<T> {
 
 }  // namespace tensorflow
 
-#endif  // TENSORFLOW_FRAMEWORK_NUMERIC_OP_H_
+#endif  // TENSORFLOW_CORE_FRAMEWORK_NUMERIC_OP_H_

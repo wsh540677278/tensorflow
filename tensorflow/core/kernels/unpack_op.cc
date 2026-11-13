@@ -15,13 +15,18 @@ limitations under the License.
 
 // See docs in ../ops/array_ops.cc.
 
+#include <limits>
+
+#include "absl/log/check.h"
+#include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 #define EIGEN_USE_THREADS
 
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "unsupported/Eigen/CXX11/Tensor"  // from @eigen_archive
+#include "tensorflow/core/framework/bounds_check.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/tensor.h"
-#include "tensorflow/core/kernels/bounds_check.h"
 #include "tensorflow/core/kernels/ops_util.h"
 #include "tensorflow/core/kernels/split_lib.h"
 #include "tensorflow/core/lib/core/status.h"
@@ -32,10 +37,6 @@ namespace tensorflow {
 typedef Eigen::ThreadPoolDevice CPUDevice;
 typedef Eigen::GpuDevice GPUDevice;
 
-#ifdef TENSORFLOW_USE_SYCL
-typedef Eigen::SyclDevice SYCLDevice;
-#endif // TENSORFLOW_USE_SYCL
-
 template <typename Device, typename T>
 class UnpackOp : public OpKernel {
  public:
@@ -44,7 +45,7 @@ class UnpackOp : public OpKernel {
   }
 
   void Compute(OpKernelContext* context) override {
-    const int32 num = num_outputs();
+    const int32_t num = num_outputs();
     const Tensor& input = context->input(0);
     const TensorShape& input_shape = input.shape();
 
@@ -52,22 +53,24 @@ class UnpackOp : public OpKernel {
     if (axis < 0) axis += input_shape.dims();
 
     OP_REQUIRES(context, 0 <= axis && axis < input_shape.dims(),
-                errors::InvalidArgument("axis = ", axis_, " not in [",
-                                        -input_shape.dims(), ", ",
-                                        input_shape.dims(), ")"));
+                absl::InvalidArgumentError(absl::StrCat(
+                    "axis = ", axis_, " not in [", -input_shape.dims(), ", ",
+                    input_shape.dims(), ")")));
 
-    OP_REQUIRES(
-        context, input_shape.dims() > 0 && input_shape.dim_size(axis) == num,
-        errors::InvalidArgument("Input shape axis ", axis, " must equal ", num,
-                                ", got shape ", input_shape.DebugString()));
+    OP_REQUIRES(context,
+                input_shape.dims() > 0 && input_shape.dim_size(axis) == num,
+                absl::InvalidArgumentError(
+                    absl::StrCat("Input shape axis ", axis, " must equal ", num,
+                                 ", got shape ", input_shape.DebugString())));
 
     auto output_shape = input_shape;
     output_shape.RemoveDim(axis);
-    const int64 output_size = output_shape.num_elements();
+    const int64_t output_size = output_shape.num_elements();
     OP_REQUIRES(
-        context, FastBoundsCheck(output_size,
-                                 std::numeric_limits<Eigen::DenseIndex>::max()),
-        errors::InvalidArgument("output size must fit in Eigen DenseIndex"));
+        context,
+        FastBoundsCheck(output_size,
+                        std::numeric_limits<Eigen::DenseIndex>::max()),
+        absl::InvalidArgumentError("output size must fit in Eigen DenseIndex"));
 
     // Special case: Aligned, so we can share the underlying buffer.
     //
@@ -86,34 +89,36 @@ class UnpackOp : public OpKernel {
       return;
     }
 
-    int64 before_dim = 1;
+    Eigen::DenseIndex before_dim = 1;
     for (int i = 0; i < axis; ++i) {
       before_dim *= input_shape.dim_size(i);
     }
 
-    int64 after_dim = 1;
+    Eigen::DenseIndex after_dim = 1;
     for (int i = axis + 1; i < input_shape.dims(); ++i) {
       after_dim *= input_shape.dim_size(i);
     }
-    const int64 axis_dim = input_shape.dim_size(axis);
+    const Eigen::DenseIndex axis_dim = input_shape.dim_size(axis);
 
     // Except for shape, unpack is a special case of split, so we reuse the
     // same computational kernels.
     auto input_reshaped =
-        input.shaped<T, 3>({1, before_dim, axis_dim * after_dim});
+        input.shaped<T, 2>({before_dim, axis_dim * after_dim});
 
     for (int i = 0; i < num; ++i) {
+      if (!context->output_required(i)) continue;
+
       Tensor* output;
       OP_REQUIRES_OK(context,
                      context->allocate_output(i, output_shape, &output));
 
       if (output_shape.num_elements() > 0) {
-        auto output_shaped = output->shaped<T, 3>({1, before_dim, after_dim});
-        Eigen::DSizes<Eigen::DenseIndex, 3> indices{0, 0, i * after_dim};
-        Eigen::DSizes<Eigen::DenseIndex, 3> sizes{1, before_dim, after_dim};
-        functor::Split<Device, T>()(context->eigen_device<Device>(),
-                                    output_shaped, input_reshaped, indices,
-                                    sizes);
+        auto output_shaped = output->shaped<T, 2>({before_dim, after_dim});
+        Eigen::DSizes<Eigen::DenseIndex, 2> indices{0, i * after_dim};
+        Eigen::DSizes<Eigen::DenseIndex, 2> sizes{before_dim, after_dim};
+        functor::Split<Device, T, 2>()(context->eigen_device<Device>(),
+                                       output_shaped, input_reshaped, indices,
+                                       sizes);
       }
     }
   }
@@ -128,51 +133,38 @@ class UnpackOp : public OpKernel {
       UnpackOp<CPUDevice, type>)
 
 TF_CALL_ALL_TYPES(REGISTER_UNPACK);
+TF_CALL_float8_e5m2(REGISTER_UNPACK);
+TF_CALL_float8_e4m3fn(REGISTER_UNPACK);
 
 #undef REGISTER_UNPACK
 
-#if GOOGLE_CUDA
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
 #define REGISTER_GPU(type)                                         \
   REGISTER_KERNEL_BUILDER(                                         \
       Name("Unpack").Device(DEVICE_GPU).TypeConstraint<type>("T"), \
       UnpackOp<GPUDevice, type>)
 
-TF_CALL_GPU_NUMBER_TYPES(REGISTER_GPU);
+TF_CALL_uint8(REGISTER_GPU);
+TF_CALL_GPU_ALL_TYPES(REGISTER_GPU);
 #undef REGISTER_GPU
 
-// A special GPU kernel for int32.
+#endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+
+// A special DEVICE_DEFAULT kernel for int32.
 // TODO(b/25387198): Also enable int32 in device memory. This kernel
 // registration requires all int32 inputs and outputs to be in host memory.
 REGISTER_KERNEL_BUILDER(Name("Unpack")
-                            .Device(DEVICE_GPU)
+                            .Device(DEVICE_DEFAULT)
                             .HostMemory("value")
                             .HostMemory("output")
-                            .TypeConstraint<int32>("T"),
-                        UnpackOp<CPUDevice, int32>);
-
-#endif  // GOOGLE_CUDA
-
-#ifdef TENSORFLOW_USE_SYCL
-#define REGISTER_SYCL(type)                                         \
-  REGISTER_KERNEL_BUILDER(                                          \
-      Name("Unpack").Device(DEVICE_SYCL).TypeConstraint<type>("T"), \
-      UnpackOp<SYCLDevice, type>)
-
-REGISTER_SYCL(float);
-REGISTER_SYCL(double);
-#undef REGISTER_SYCL
-
-// A special SYCL kernel for int32.
-// TODO(b/25387198): Also enable int32 in device memory. This kernel
-// registration requires all int32 inputs and outputs to be in host memory.
+                            .TypeConstraint<int32_t>("T"),
+                        UnpackOp<CPUDevice, int32_t>);
 REGISTER_KERNEL_BUILDER(Name("Unpack")
-                            .Device(DEVICE_SYCL)
+                            .Device(DEVICE_DEFAULT)
                             .HostMemory("value")
                             .HostMemory("output")
-                            .TypeConstraint<int32>("T"),
-                        UnpackOp<CPUDevice, int32>);
-
-#endif  // TENSORFLOW_USE_SYCL
+                            .TypeConstraint<int64_t>("T"),
+                        UnpackOp<CPUDevice, int64_t>);
 
 }  // end namespace tensorflow

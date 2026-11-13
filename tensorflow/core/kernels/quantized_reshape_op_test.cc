@@ -20,7 +20,6 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/kernel_benchmark_testlib.h"
 #include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/fake_input.h"
-#include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/node_def_builder.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -38,7 +37,7 @@ namespace tensorflow {
 
 class QuantizedReshapeTest : public OpsTestBase {
  protected:
-  QuantizedReshapeTest() {}
+  QuantizedReshapeTest() = default;
 };
 
 TEST_F(QuantizedReshapeTest, Reshape) {
@@ -57,7 +56,7 @@ TEST_F(QuantizedReshapeTest, Reshape) {
     expected.flat<quint8>()(i) = quint8(i);
   }
   AddInputFromArray<quint8>(input.shape(), input.flat<quint8>());
-  AddInputFromList<int32>({3}, {5, 10, 4});  // shape
+  AddInputFromList<int32_t>({3}, {5, 10, 4});  // shape
   AddInputFromArray<float>(TensorShape({1}), {-10});
   AddInputFromArray<float>(TensorShape({1}), {20});
   TF_ASSERT_OK(RunOpKernel());

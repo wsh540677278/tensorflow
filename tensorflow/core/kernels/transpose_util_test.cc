@@ -13,6 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <cstdint>
+
+#include "absl/types/span.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_testutil.h"
 #include "tensorflow/core/kernels/transpose_functor.h"
@@ -23,15 +26,15 @@ namespace tensorflow {
 class TransposeUtilTest : public ::testing::Test {
  protected:
   void TestDimensionReduction(const TensorShape& shape,
-                              const gtl::ArraySlice<int32>& perm,
-                              const gtl::ArraySlice<int32>& expected_perm,
-                              const gtl::ArraySlice<int64>& expected_dims) {
+                              const absl::Span<const int32_t> perm,
+                              const absl::Span<const int32_t> expected_perm,
+                              const absl::Span<const int64_t> expected_dims) {
     internal::TransposePermsVec new_perm;
     internal::TransposeDimsVec new_dims;
     internal::ReduceTransposeDimensions(shape, perm, &new_perm, &new_dims);
 
-    gtl::ArraySlice<int32> computed_perm(new_perm);
-    gtl::ArraySlice<int64> computed_dims(new_dims);
+    absl::Span<const int32_t> computed_perm(new_perm);
+    absl::Span<const int64_t> computed_dims(new_dims);
     EXPECT_EQ(computed_perm, expected_perm);
     EXPECT_EQ(computed_dims, expected_dims);
   }
@@ -96,6 +99,38 @@ TEST_F(TransposeUtilTest, LargeDimensionReduction) {
                          {362880, 10, 20});
   TestDimensionReduction({2, 3, 4, 5, 6, 7, 8, 9, 10, 20},
                          {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, {0}, {72576000});
+}
+
+TEST_F(TransposeUtilTest, NonSingletonDimensionAlignment) {
+  // Non-singleton dims 0, 2
+  EXPECT_TRUE(internal::NonSingletonDimensionsAlign({2, 1, 2}, {1, 0, 2}));
+  EXPECT_TRUE(internal::NonSingletonDimensionsAlign({2, 1, 2}, {0, 2, 1}));
+  EXPECT_FALSE(internal::NonSingletonDimensionsAlign({2, 1, 2}, {2, 0, 1}));
+  EXPECT_FALSE(internal::NonSingletonDimensionsAlign({2, 1, 2}, {2, 1, 0}));
+
+  // Non-singleton dims 0, 2, 4
+  EXPECT_TRUE(
+      internal::NonSingletonDimensionsAlign({2, 1, 2, 1, 2}, {0, 2, 4, 1, 3}));
+  EXPECT_TRUE(
+      internal::NonSingletonDimensionsAlign({2, 1, 2, 1, 2}, {0, 2, 1, 4, 3}));
+  EXPECT_TRUE(
+      internal::NonSingletonDimensionsAlign({2, 1, 2, 1, 2}, {1, 3, 0, 2, 4}));
+  EXPECT_TRUE(
+      internal::NonSingletonDimensionsAlign({2, 1, 2, 1, 2}, {3, 0, 1, 2, 4}));
+  EXPECT_FALSE(
+      internal::NonSingletonDimensionsAlign({2, 1, 2, 1, 2}, {3, 2, 0, 1, 4}));
+
+  // Non-singleton dims 2, 4, 5
+  EXPECT_TRUE(internal::NonSingletonDimensionsAlign({1, 1, 2, 1, 2, 2},
+                                                    {3, 2, 1, 4, 0, 5}));
+  EXPECT_TRUE(internal::NonSingletonDimensionsAlign({1, 1, 2, 1, 2, 2},
+                                                    {3, 1, 0, 2, 4, 5}));
+  EXPECT_TRUE(internal::NonSingletonDimensionsAlign({1, 1, 2, 1, 2, 2},
+                                                    {2, 4, 5, 0, 3, 1}));
+  EXPECT_FALSE(internal::NonSingletonDimensionsAlign({1, 1, 2, 1, 2, 2},
+                                                     {0, 1, 5, 2, 4, 3}));
+  EXPECT_FALSE(internal::NonSingletonDimensionsAlign({1, 1, 2, 1, 2, 2},
+                                                     {0, 1, 2, 5, 4, 3}));
 }
 
 }  // namespace tensorflow

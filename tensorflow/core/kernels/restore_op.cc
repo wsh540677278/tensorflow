@@ -33,15 +33,16 @@ class RestoreOp : public OpKernel {
     if (preferred_shard == -1) {
       preferred_shard_ = checkpoint::TensorSliceReader::kLoadAllShards;
     } else {
-      OP_REQUIRES(context, preferred_shard >= 0,
-                  errors::InvalidArgument("Attribute 'preferred_shard' must be "
-                                          "greater or equal to -1"));
+      OP_REQUIRES(
+          context, preferred_shard >= 0,
+          absl::InvalidArgumentError("Attribute 'preferred_shard' must be "
+                                     "greater or equal to -1"));
       preferred_shard_ = preferred_shard;
     }
   }
   void Compute(OpKernelContext* context) override {
     RestoreTensor(context, &checkpoint::OpenTableTensorSliceReader,
-                  preferred_shard_, false);
+                  preferred_shard_, false, 0);
   }
 
  private:
@@ -59,15 +60,16 @@ class RestoreSliceOp : public OpKernel {
     if (preferred_shard == -1) {
       preferred_shard_ = checkpoint::TensorSliceReader::kLoadAllShards;
     } else {
-      OP_REQUIRES(context, preferred_shard >= 0,
-                  errors::InvalidArgument("Attribute 'preferred_shard' must be "
-                                          "greater or equal to -1"));
+      OP_REQUIRES(
+          context, preferred_shard >= 0,
+          absl::InvalidArgumentError("Attribute 'preferred_shard' must be "
+                                     "greater or equal to -1"));
       preferred_shard_ = preferred_shard;
     }
   }
   void Compute(OpKernelContext* context) override {
     RestoreTensor(context, &checkpoint::OpenTableTensorSliceReader,
-                  preferred_shard_, true);
+                  preferred_shard_, true, 0);
   }
 
  private:

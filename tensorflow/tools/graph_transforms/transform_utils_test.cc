@@ -19,12 +19,10 @@ limitations under the License.
 #include "tensorflow/cc/ops/nn_ops.h"
 #include "tensorflow/cc/ops/standard_ops.h"
 #include "tensorflow/core/framework/tensor_testutil.h"
-#include "tensorflow/core/graph/equal_graph_def.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/lib/io/path.h"
 #include "tensorflow/core/platform/test.h"
 #include "tensorflow/core/platform/test_benchmark.h"
-#include "tensorflow/core/public/session.h"
 
 namespace tensorflow {
 namespace graph_transforms {
@@ -53,7 +51,7 @@ class TransformUtilsTest : public ::testing::Test {
 
     GraphDef graph_def;
     TF_ASSERT_OK(root.ToGraphDef(&graph_def));
-    std::map<string, const NodeDef*> node_map;
+    std::map<std::string, const NodeDef*> node_map;
     MapNamesToNodes(graph_def, &node_map);
 
     EXPECT_EQ(1, node_map.count("a"));
@@ -87,7 +85,7 @@ class TransformUtilsTest : public ::testing::Test {
     GraphDef graph_def;
     TF_ASSERT_OK(root.ToGraphDef(&graph_def));
 
-    std::map<string, std::vector<const NodeDef*>> outputs_map;
+    std::map<std::string, std::vector<const NodeDef*>> outputs_map;
     MapNodesToOutputs(graph_def, &outputs_map);
 
     EXPECT_EQ(1, outputs_map.count("a"));
@@ -111,9 +109,9 @@ class TransformUtilsTest : public ::testing::Test {
   }
 
   void TestNodeNamePartsFromInput() {
-    string prefix;
-    string node_name;
-    string suffix;
+    std::string prefix;
+    std::string node_name;
+    std::string suffix;
 
     NodeNamePartsFromInput("some_node_name", &prefix, &node_name, &suffix);
     EXPECT_EQ("", prefix);
@@ -174,48 +172,48 @@ class TransformUtilsTest : public ::testing::Test {
 
   void TestSetNodeAttr() {
     NodeDef node;
-    int32 value_i = 32;
+    int32_t value_i = 32;
     SetNodeAttr("foo", value_i, &node);
     EXPECT_EQ(32, node.attr().at("foo").i());
-    string value_s = "some_value";
+    std::string value_s = "some_value";
     SetNodeAttr("bar", value_s, &node);
     EXPECT_EQ("some_value", node.attr().at("bar").s());
   }
 
   void TestSetNodeTensorAttr() {
     NodeDef node;
-    SetNodeTensorAttr<int32>("foo", {3, 1}, {1, 2, 3}, &node);
+    SetNodeTensorAttr<int32_t>("foo", {3, 1}, {1, 2, 3}, &node);
     TensorProto tensor_proto = node.attr().at("foo").tensor();
     Tensor tensor;
     CHECK(tensor.FromProto(tensor_proto));
     EXPECT_EQ(DT_INT32, tensor.dtype());
     EXPECT_EQ(3, tensor.shape().dim_size(0));
     EXPECT_EQ(1, tensor.shape().dim_size(1));
-    EXPECT_EQ(1, tensor.flat<int32>()(0));
-    EXPECT_EQ(2, tensor.flat<int32>()(1));
-    EXPECT_EQ(3, tensor.flat<int32>()(2));
+    EXPECT_EQ(1, tensor.flat<int32_t>()(0));
+    EXPECT_EQ(2, tensor.flat<int32_t>()(1));
+    EXPECT_EQ(3, tensor.flat<int32_t>()(2));
   }
 
   void TestSetNodeTensorAttrWithTensor() {
     NodeDef node;
     Tensor input_tensor(DT_INT32, {4, 5});
-    test::FillIota<int32>(&input_tensor, 1);
-    SetNodeTensorAttr<int32>("foo", input_tensor, &node);
+    test::FillIota<int32_t>(&input_tensor, 1);
+    SetNodeTensorAttr<int32_t>("foo", input_tensor, &node);
     TensorProto tensor_proto = node.attr().at("foo").tensor();
     Tensor tensor;
     CHECK(tensor.FromProto(tensor_proto));
-    test::ExpectTensorEqual<int32>(input_tensor, tensor);
+    test::ExpectTensorEqual<int32_t>(input_tensor, tensor);
   }
 
   void TestGetNodeTensorAttr() {
     NodeDef node;
     Tensor input_tensor(DT_INT32, {4, 5});
-    test::FillIota<int32>(&input_tensor, 1);
+    test::FillIota<int32_t>(&input_tensor, 1);
     TensorProto tensor_proto;
     input_tensor.AsProtoTensorContent(&tensor_proto);
     SetNodeAttr("foo", tensor_proto, &node);
     Tensor result = GetNodeTensorAttr(node, "foo");
-    test::ExpectTensorEqual<int32>(input_tensor, result);
+    test::ExpectTensorEqual<int32_t>(input_tensor, result);
   }
 
   void TestFilterGraphDef() {
@@ -249,7 +247,7 @@ class TransformUtilsTest : public ::testing::Test {
         [](const NodeDef& node) { return (node.name() != "remove_me"); },
         &result_graph_def);
 
-    std::map<string, const NodeDef*> node_map;
+    std::map<std::string, const NodeDef*> node_map;
     MapNamesToNodes(result_graph_def, &node_map);
     EXPECT_EQ(1, node_map.count("a"));
     EXPECT_EQ(1, node_map.count("b"));
@@ -271,7 +269,7 @@ class TransformUtilsTest : public ::testing::Test {
     GraphDef result_graph_def;
     RemoveAttributes(graph_def, {"dtype"}, &result_graph_def);
 
-    std::map<string, const NodeDef*> node_map;
+    std::map<std::string, const NodeDef*> node_map;
     MapNamesToNodes(result_graph_def, &node_map);
     const NodeDef* removed_placeholder = node_map["placeholder"];
     EXPECT_EQ(nullptr,
@@ -434,12 +432,12 @@ class TransformUtilsTest : public ::testing::Test {
     GraphDef replaced_graph_def;
     TF_ASSERT_OK(ReplaceMatchingOpTypes(
         graph_def, {"*"},
-        [](const NodeMatch& match, const std::set<string>& input_nodes,
-           const std::set<string>& output_nodes,
+        [](const NodeMatch& match, const std::set<std::string>& input_nodes,
+           const std::set<std::string>& output_nodes,
            std::vector<NodeDef>* new_nodes) {
           NodeDef original_copy;
-          original_copy.CopyFrom(match.node);
-          const string original_name = match.node.name();
+          original_copy = match.node;
+          const std::string original_name = match.node.name();
           original_copy.set_name(original_name + "_before_identity");
           new_nodes->push_back(original_copy);
 
@@ -449,7 +447,7 @@ class TransformUtilsTest : public ::testing::Test {
           *(identity_node.mutable_input()->Add()) = original_copy.name();
           new_nodes->push_back(identity_node);
 
-          return Status::OK();
+          return absl::OkStatus();
         },
         {}, &replaced_graph_def));
 
@@ -542,10 +540,10 @@ class TransformUtilsTest : public ::testing::Test {
 
     GraphDef renamed_graph_def;
     TF_ASSERT_OK(RenameNodeInputs(graph_def, {{"a", "b"}},
-                                  std::unordered_set<string>(),
+                                  std::unordered_set<std::string>(),
                                   &renamed_graph_def));
 
-    std::map<string, const NodeDef*> node_map;
+    std::map<std::string, const NodeDef*> node_map;
     MapNamesToNodes(renamed_graph_def, &node_map);
     EXPECT_EQ("b", node_map.at("add")->input(0));
     EXPECT_EQ("b", node_map.at("add")->input(1));
@@ -581,9 +579,9 @@ class TransformUtilsTest : public ::testing::Test {
     GraphDef renamed_graph_def;
     TF_ASSERT_OK(RenameNodeInputs(
         graph_def, {{"a", "f"}, {"f", "e"}, {"e", "d"}, {"d", "c"}},
-        std::unordered_set<string>(), &renamed_graph_def));
+        std::unordered_set<std::string>(), &renamed_graph_def));
 
-    std::map<string, const NodeDef*> node_map;
+    std::map<std::string, const NodeDef*> node_map;
     MapNamesToNodes(renamed_graph_def, &node_map);
     EXPECT_EQ("c", node_map.at("add")->input(0));
     EXPECT_EQ("b", node_map.at("add")->input(1));
@@ -617,14 +615,14 @@ class TransformUtilsTest : public ::testing::Test {
     TF_ASSERT_OK(root.ToGraphDef(&graph_def));
 
     GraphDef renamed_graph_def;
-    Status rename_status =
+    absl::Status rename_status =
         RenameNodeInputs(graph_def, {{"a", "d"}, {"d", "a"}},
-                         std::unordered_set<string>(), &renamed_graph_def);
+                         std::unordered_set<std::string>(), &renamed_graph_def);
     EXPECT_FALSE(rename_status.ok());
   }
 
   void TestRenameNodeInputsWithWildcard() {
-    auto root = tensorflow::Scope::NewRootScope();
+    auto root = tensorflow::Scope::DisabledShapeInferenceScope();
     using namespace ::tensorflow::ops;  // NOLINT(build/namespaces)
 
     const int width = 10;
@@ -653,10 +651,10 @@ class TransformUtilsTest : public ::testing::Test {
 
     GraphDef renamed_graph_def;
     TF_ASSERT_OK(RenameNodeInputs(graph_def, {{"quantize_a:*", "quantize_b"}},
-                                  std::unordered_set<string>(),
+                                  std::unordered_set<std::string>(),
                                   &renamed_graph_def));
 
-    std::map<string, const NodeDef*> node_map;
+    std::map<std::string, const NodeDef*> node_map;
     MapNamesToNodes(renamed_graph_def, &node_map);
     EXPECT_EQ("quantize_b:1", node_map.at("add")->input(0));
     EXPECT_EQ("quantize_b:2", node_map.at("add")->input(1));
@@ -693,7 +691,7 @@ class TransformUtilsTest : public ::testing::Test {
     TF_ASSERT_OK(RenameNodeInputs(graph_def, {{"a", "b"}}, {"add2"},
                                   &renamed_graph_def));
 
-    std::map<string, const NodeDef*> node_map;
+    std::map<std::string, const NodeDef*> node_map;
     MapNamesToNodes(renamed_graph_def, &node_map);
     EXPECT_EQ("b", node_map.at("add")->input(0));
     EXPECT_EQ("b", node_map.at("add")->input(1));
@@ -733,10 +731,11 @@ class TransformUtilsTest : public ::testing::Test {
     const_node2->set_op("Const");
     const_node2->set_name("const_node2");
 
-    std::vector<std::pair<string, string>> invalid_inputs;
+    std::vector<std::pair<std::string, std::string>> invalid_inputs;
     FindInvalidInputs(graph_def, &invalid_inputs);
     EXPECT_EQ(3, invalid_inputs.size());
-    for (const std::pair<string, string>& invalid_input : invalid_inputs) {
+    for (const std::pair<std::string, std::string>& invalid_input :
+         invalid_inputs) {
       EXPECT_TRUE((invalid_input.first == "add_node1") ||
                   (invalid_input.first == "add_node2"));
       if (invalid_input.first == "add_node1") {
@@ -804,7 +803,7 @@ class TransformUtilsTest : public ::testing::Test {
         Const(root.WithOpName("float_const"), Input::Initializer(float_data));
 
     Tensor int_data(DT_INT32, TensorShape({width}));
-    test::FillIota<int32>(&int_data, 1);
+    test::FillIota<int32_t>(&int_data, 1);
     Output int_const =
         Const(root.WithOpName("int_const"), Input::Initializer(int_data));
 
@@ -815,7 +814,7 @@ class TransformUtilsTest : public ::testing::Test {
     GraphDef graph_def;
     TF_ASSERT_OK(root.ToGraphDef(&graph_def));
 
-    std::map<string, const NodeDef*> node_map;
+    std::map<std::string, const NodeDef*> node_map;
     MapNamesToNodes(graph_def, &node_map);
 
     const NodeDef* float_const_def = node_map.at("float_const");
@@ -922,7 +921,7 @@ class TransformUtilsTest : public ::testing::Test {
 
     auto e_root = tensorflow::Scope::NewRootScope();
     Tensor e_data(DT_INT32, TensorShape({width}));
-    test::FillIota<int32>(&e_data, 1);
+    test::FillIota<int32_t>(&e_data, 1);
     Output e_const = Const(e_root.WithOpName("a"), Input::Initializer(e_data));
     GraphDef e_graph_def;
     TF_ASSERT_OK(e_root.ToGraphDef(&e_graph_def));
@@ -978,7 +977,7 @@ class TransformUtilsTest : public ::testing::Test {
     TransformFuncContext context;
     context.params.insert({"foo", {"a", "b"}});
     context.params.insert({"bar", {"c"}});
-    string value;
+    std::string value;
     TF_EXPECT_OK(context.GetOneStringParameter("bar", "d", &value));
     EXPECT_EQ("c", value);
     EXPECT_FALSE(context.GetOneStringParameter("foo", "d", &value).ok());
@@ -992,7 +991,7 @@ class TransformUtilsTest : public ::testing::Test {
     context.params.insert({"bar", {"-23"}});
     context.params.insert({"not_a_number", {"not_numerical"}});
     context.params.insert({"float", {"-23.232323"}});
-    int32 value;
+    int32_t value;
     TF_EXPECT_OK(context.GetOneInt32Parameter("bar", 0, &value));
     EXPECT_EQ(-23, value);
     EXPECT_FALSE(context.GetOneInt32Parameter("foo", 0, &value).ok());
@@ -1008,7 +1007,7 @@ class TransformUtilsTest : public ::testing::Test {
     context.params.insert({"bar", {"-23"}});
     context.params.insert({"not_a_number", {"not_numerical"}});
     context.params.insert({"float", {"-23.232323"}});
-    int64 value;
+    int64_t value;
     TF_EXPECT_OK(context.GetOneInt64Parameter("bar", 0, &value));
     EXPECT_EQ(-23, value);
     EXPECT_FALSE(context.GetOneInt64Parameter("foo", 0, &value).ok());
@@ -1065,50 +1064,6 @@ class TransformUtilsTest : public ::testing::Test {
     value = false;
     TF_EXPECT_OK(context.GetOneBoolParameter("not_present", true, &value));
     EXPECT_TRUE(value);
-  }
-
-  void TestLoadTextOrBinaryGraphFile() {
-    using namespace ::tensorflow::ops;  // NOLINT(build/namespaces)
-    const int width = 10;
-
-    auto root = tensorflow::Scope::NewRootScope();
-    Tensor a_data(DT_FLOAT, TensorShape({width}));
-    test::FillIota<float>(&a_data, 1.0f);
-    Output a_const = Const(root.WithOpName("a"), Input::Initializer(a_data));
-    GraphDef graph_def;
-    TF_ASSERT_OK(root.ToGraphDef(&graph_def));
-
-    const string text_file =
-        io::JoinPath(testing::TmpDir(), "text_graph.pbtxt");
-    TF_ASSERT_OK(WriteTextProto(Env::Default(), text_file, graph_def));
-
-    const string binary_file =
-        io::JoinPath(testing::TmpDir(), "binary_graph.pb");
-    TF_ASSERT_OK(WriteBinaryProto(Env::Default(), binary_file, graph_def));
-
-    const string bogus_file = io::JoinPath(testing::TmpDir(), "bogus_graph.pb");
-    TF_ASSERT_OK(
-        WriteStringToFile(Env::Default(), bogus_file, "Not a !{ proto..."));
-
-    GraphDef text_graph_def;
-    TF_EXPECT_OK(LoadTextOrBinaryGraphFile(text_file, &text_graph_def));
-    string text_diff;
-    EXPECT_TRUE(EqualGraphDef(text_graph_def, graph_def, &text_diff))
-        << text_diff;
-
-    GraphDef binary_graph_def;
-    TF_EXPECT_OK(LoadTextOrBinaryGraphFile(binary_file, &binary_graph_def));
-    string binary_diff;
-    EXPECT_TRUE(EqualGraphDef(binary_graph_def, graph_def, &binary_diff))
-        << binary_diff;
-
-    GraphDef no_graph_def;
-    EXPECT_FALSE(
-        LoadTextOrBinaryGraphFile("____non_existent_file_____", &no_graph_def)
-            .ok());
-
-    GraphDef bogus_graph_def;
-    EXPECT_FALSE(LoadTextOrBinaryGraphFile(bogus_file, &bogus_graph_def).ok());
   }
 };
 
@@ -1204,10 +1159,6 @@ TEST_F(TransformUtilsTest, TestGetOneFloatParameter) {
 
 TEST_F(TransformUtilsTest, TestGetOneBoolParameter) {
   TestGetOneBoolParameter();
-}
-
-TEST_F(TransformUtilsTest, TestLoadTextOrBinaryGraphFile) {
-  TestLoadTextOrBinaryGraphFile();
 }
 
 }  // namespace graph_transforms

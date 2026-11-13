@@ -15,8 +15,8 @@ limitations under the License.
 
 // TODO(vrv): Switch this to an open-sourced version of Arena.
 
-#ifndef TENSORFLOW_LIB_CORE_ARENA_H_
-#define TENSORFLOW_LIB_CORE_ARENA_H_
+#ifndef TENSORFLOW_CORE_LIB_CORE_ARENA_H_
+#define TENSORFLOW_CORE_LIB_CORE_ARENA_H_
 
 #include <assert.h>
 
@@ -57,12 +57,12 @@ class Arena {
 #ifdef __i386__
   static const int kDefaultAlignment = 4;
 #else
-  static const int kDefaultAlignment = 8;
+  static constexpr int kDefaultAlignment = 8;
 #endif
 
  protected:
   bool SatisfyAlignment(const size_t alignment);
-  void MakeNewBlock(const uint32 alignment);
+  void MakeNewBlock(const uint32_t alignment);
   void* GetMemoryFallback(const size_t size, const int align);
   void* GetMemory(const size_t size, const int align) {
     assert(remaining_ <= block_size_);                  // an invariant
@@ -88,7 +88,7 @@ class Arena {
   // The returned AllocatedBlock* is valid until the next call to AllocNewBlock
   // or Reset (i.e. anything that might affect overflow_blocks_).
   AllocatedBlock* AllocNewBlock(const size_t block_size,
-                                const uint32 alignment);
+                                const uint32_t alignment);
 
   const size_t block_size_;
   char* freestart_;  // beginning of the free space in most recent block
@@ -101,10 +101,11 @@ class Arena {
 
   void FreeBlocks();  // Frees all except first block
 
-  TF_DISALLOW_COPY_AND_ASSIGN(Arena);
+  Arena(const Arena&) = delete;
+  void operator=(const Arena&) = delete;
 };
 
 }  // namespace core
 }  // namespace tensorflow
 
-#endif  // TENSORFLOW_LIB_CORE_ARENA_H_
+#endif  // TENSORFLOW_CORE_LIB_CORE_ARENA_H_

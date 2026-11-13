@@ -16,26 +16,19 @@ limitations under the License.
 #include "tensorflow/core/kernels/cwise_ops_common.h"
 
 namespace tensorflow {
-REGISTER5(UnaryOp, CPU, "Abs", functor::abs, float, Eigen::half, double, int32,
-          int64);
-#if !defined(IS_MOBILE_PLATFORM)
+
+REGISTER8(UnaryOp, CPU, "Abs", functor::abs, Eigen::half, bfloat16, float,
+          double, int8_t, int16_t, int32_t, int64_t);
+
 REGISTER2(UnaryOp, CPU, "ComplexAbs", functor::abs, complex64, complex128);
+
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+#if !defined(MLIR_GENERATED_GPU_KERNELS_ENABLED)
+REGISTER4(UnaryOp, GPU, "Abs", functor::abs, Eigen::half, float, double, int64);
+REGISTER2(UnaryOp, GPU, "ComplexAbs", functor::abs, complex64, complex128);
 #endif
 
-#if TENSORFLOW_USE_SYCL
-#define REGISTER_SYCL_KERNEL(TYPE)                                    \
-  REGISTER_KERNEL_BUILDER(                                            \
-                          Name("Abs")                                 \
-                          .Device(DEVICE_SYCL)                        \
-                          .TypeConstraint<TYPE>("T"),                 \
-                          UnaryOp<SYCLDevice, functor::abs<TYPE>>);
-REGISTER_SYCL_KERNEL(float);
-#undef REGISTER_SYCL_KERNEL
-#endif // TENSORFLOW_USE_SYCL
-
-#if GOOGLE_CUDA
-REGISTER4(UnaryOp, GPU, "Abs", functor::abs, float, Eigen::half, double, int64);
-REGISTER2(UnaryOp, GPU, "ComplexAbs", functor::abs, complex64, complex128);
+REGISTER(UnaryOp, GPU, "Abs", functor::abs, Eigen::bfloat16);
 
 // A special GPU kernel for int32.
 // TODO(b/25387198): Also enable int32 in device memory. This kernel
@@ -44,8 +37,14 @@ REGISTER_KERNEL_BUILDER(Name("Abs")
                             .Device(DEVICE_GPU)
                             .HostMemory("x")
                             .HostMemory("y")
-                            .TypeConstraint<int32>("T"),
-                        UnaryOp<CPUDevice, functor::abs<int32>>);
+                            .TypeConstraint<int32_t>("T"),
+                        UnaryOp<CPUDevice, functor::abs<int32_t>>);
 #endif
+REGISTER_KERNEL_BUILDER(Name("Abs")
+                            .Device(DEVICE_DEFAULT)
+                            .HostMemory("x")
+                            .HostMemory("y")
+                            .TypeConstraint<int32_t>("T"),
+                        UnaryOp<CPUDevice, functor::abs<int32_t>>);
 
 }  // namespace tensorflow

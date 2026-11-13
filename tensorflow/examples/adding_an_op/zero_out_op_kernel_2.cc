@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include "tensorflow/core/framework/common_shape_fns.h"
+#include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/shape_inference.h"
@@ -65,7 +66,7 @@ class ZeroOutOp : public OpKernel {
     auto input = input_tensor.flat<T>();
 
     // Create an output tensor
-    Tensor* output = NULL;
+    Tensor* output = nullptr;
     OP_REQUIRES_OK(context,
                    context->allocate_output(0, input_tensor.shape(), &output));
     auto output_flat = output->template flat<T>();
@@ -101,7 +102,7 @@ REGISTER_KERNEL_BUILDER(Name("ZeroOut")
 
 REGISTER_KERNEL(float);
 REGISTER_KERNEL(double);
-REGISTER_KERNEL(int32);
+REGISTER_KERNEL(int32_t);
 
 #undef REGISTER_KERNEL
 

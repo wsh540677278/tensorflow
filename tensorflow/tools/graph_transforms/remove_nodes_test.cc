@@ -29,9 +29,9 @@ namespace tensorflow {
 namespace graph_transforms {
 
 // Declare here, so we don't need a public header.
-Status RemoveNodes(const GraphDef& input_graph_def,
-                   const TransformFuncContext& context,
-                   GraphDef* output_graph_def);
+absl::Status RemoveNodes(const GraphDef& input_graph_def,
+                         const TransformFuncContext& context,
+                         GraphDef* output_graph_def);
 
 class RemoveNodesTest : public ::testing::Test {
  protected:
@@ -93,11 +93,11 @@ class RemoveNodesTest : public ::testing::Test {
     TransformFuncContext context;
     context.input_names = {};
     context.output_names = {"add_node1"};
-    context.params.insert(
-        std::pair<string, std::vector<string>>({"op", {string("Identity")}}));
+    context.params.insert(std::pair<std::string, std::vector<std::string>>(
+        {"op", {std::string("Identity")}}));
     TF_ASSERT_OK(RemoveNodes(graph_def, context, &result));
 
-    std::map<string, const NodeDef*> node_lookup;
+    std::map<std::string, const NodeDef*> node_lookup;
     MapNamesToNodes(result, &node_lookup);
     EXPECT_EQ(1, node_lookup.count("add_node1"));
     EXPECT_EQ("add_node2", node_lookup.at("add_node1")->input(0));
@@ -148,11 +148,11 @@ class RemoveNodesTest : public ::testing::Test {
     TransformFuncContext context;
     context.input_names = {};
     context.output_names = {"identity_node"};
-    context.params.insert(
-        std::pair<string, std::vector<string>>({"op", {string("Identity")}}));
+    context.params.insert(std::pair<std::string, std::vector<std::string>>(
+        {"op", {std::string("Identity")}}));
     TF_ASSERT_OK(RemoveNodes(graph_def, context, &result));
 
-    std::map<string, const NodeDef*> node_lookup;
+    std::map<std::string, const NodeDef*> node_lookup;
     MapNamesToNodes(result, &node_lookup);
     EXPECT_EQ(1, node_lookup.count("add_node"));
     EXPECT_EQ("const_node1", node_lookup.at("add_node")->input(0));
@@ -197,11 +197,11 @@ class RemoveNodesTest : public ::testing::Test {
     TransformFuncContext context;
     context.input_names = {};
     context.output_names = {"identity_node"};
-    context.params.insert(
-        std::pair<string, std::vector<string>>({"op", {string("Identity")}}));
+    context.params.insert(std::pair<std::string, std::vector<std::string>>(
+        {"op", {std::string("Identity")}}));
     TF_ASSERT_OK(RemoveNodes(graph_def, context, &result));
 
-    std::map<string, const NodeDef*> node_lookup;
+    std::map<std::string, const NodeDef*> node_lookup;
     MapNamesToNodes(result, &node_lookup);
     EXPECT_EQ(1, node_lookup.count("add_node"));
     EXPECT_EQ("const_node1", node_lookup.at("add_node")->input(0));
@@ -210,6 +210,58 @@ class RemoveNodesTest : public ::testing::Test {
     EXPECT_EQ(0, node_lookup.count("identity_node2"));
     EXPECT_EQ(0, node_lookup.count("identity_node3"));
   }
+
+  void TestRemoveMultipleInputs() {
+    GraphDef graph_def;
+
+    NodeDef* const_node1 = graph_def.add_node();
+    const_node1->set_name("const_node1");
+    const_node1->set_op("Const");
+
+    NodeDef* const_node2 = graph_def.add_node();
+    const_node2->set_name("const_node2");
+    const_node2->set_op("Const");
+
+    NodeDef* const_node3 = graph_def.add_node();
+    const_node3->set_name("const_node3");
+    const_node3->set_op("Const");
+
+    NodeDef* const_node4 = graph_def.add_node();
+    const_node4->set_name("const_node4");
+    const_node4->set_op("Const");
+
+    NodeDef* fake_quant_node = graph_def.add_node();
+    fake_quant_node->set_name("fake_quant_node");
+    fake_quant_node->set_op("FakeQuantWithMinMaxVars");
+    fake_quant_node->add_input("const_node1");
+    fake_quant_node->add_input("const_node2");
+    fake_quant_node->add_input("const_node3");
+
+    NodeDef* add_node = graph_def.add_node();
+    add_node->set_name("add_node");
+    add_node->set_op("Add");
+    add_node->add_input("fake_quant_node");
+    add_node->add_input("const_node4");
+
+    GraphDef result;
+    TransformFuncContext context;
+    context.input_names = {};
+    context.output_names = {"add_node"};
+    context.params.insert(std::pair<std::string, std::vector<std::string>>(
+        {"op", {std::string("FakeQuantWithMinMaxVars")}}));
+    context.params.insert(std::pair<std::string, std::vector<std::string>>(
+        {"max_inputs", {std::string("3")}}));
+    TF_ASSERT_OK(RemoveNodes(graph_def, context, &result));
+
+    std::map<std::string, const NodeDef*> node_lookup;
+    MapNamesToNodes(result, &node_lookup);
+    ASSERT_EQ(1, node_lookup.count("const_node1"));
+    ASSERT_EQ(1, node_lookup.count("const_node4"));
+    ASSERT_EQ(0, node_lookup.count("fake_quant_node"));
+    ASSERT_EQ(1, node_lookup.count("add_node"));
+    EXPECT_EQ("const_node1", node_lookup.at("add_node")->input(0));
+    EXPECT_EQ("const_node4", node_lookup.at("add_node")->input(1));
+  }
 };
 
 TEST_F(RemoveNodesTest, TestRemoveNodes) { TestRemoveNodes(); }
@@ -217,6 +269,10 @@ TEST_F(RemoveNodesTest, TestRemoveNodes) { TestRemoveNodes(); }
 TEST_F(RemoveNodesTest, TestRemoveOutputNodes) { TestRemoveOutputNodes(); }
 
 TEST_F(RemoveNodesTest, TestRemoveChainedNodes) { TestRemoveChainedNodes(); }
+
+TEST_F(RemoveNodesTest, TestRemoveMultipleInputs) {
+  TestRemoveMultipleInputs();
+}
 
 }  // namespace graph_transforms
 }  // namespace tensorflow

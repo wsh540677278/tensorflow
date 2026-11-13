@@ -13,22 +13,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef THIRD_PARTY_TENSORFLOW_CORE_KERNELS_SCATTER_ND_OP_CPU_IMPL_H_
-#define THIRD_PARTY_TENSORFLOW_CORE_KERNELS_SCATTER_ND_OP_CPU_IMPL_H_
+#ifndef TENSORFLOW_CORE_KERNELS_SCATTER_ND_OP_CPU_IMPL_H_
+#define TENSORFLOW_CORE_KERNELS_SCATTER_ND_OP_CPU_IMPL_H_
 
 // Functor definitions for ScatterND ops, must be compilable by nvcc.
 
 #define EIGEN_USE_THREADS
 
+#include <algorithm>
 #include <atomic>
+#include <type_traits>
 
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
-
+#include "unsupported/Eigen/CXX11/Tensor"  // from @eigen_archive
+#include "tensorflow/core/framework/bounds_check.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_shape.h"
-#include "tensorflow/core/kernels/bounds_check.h"
 #include "tensorflow/core/kernels/fill_functor.h"
 #include "tensorflow/core/kernels/scatter_nd_op.h"
 #include "tensorflow/core/platform/mutex.h"
@@ -44,56 +45,61 @@ class OpKernelContext;
 // Specialization of UpdateExecutor to CPU
 namespace update_executor {
 
-template <typename Input, typename Update, typename Output,
+template <typename T, typename Input, typename Update, typename Output,
           scatter_nd_op::UpdateOp OP>
 class UpdateExecutor {
  public:
-  EIGEN_STRONG_INLINE static void Execute(Input value, Update update,
-                                          Output output);
+  EIGEN_STRONG_INLINE static void Execute(const T& device, Input value,
+                                          Update update, Output output);
 };
 
-template <typename Input, typename Update, typename Output>
-class UpdateExecutor<Input, Update, Output, scatter_nd_op::UpdateOp::ASSIGN> {
+template <typename T, typename Input, typename Update, typename Output>
+class UpdateExecutor<T, Input, Update, Output,
+                     scatter_nd_op::UpdateOp::ASSIGN> {
  public:
-  EIGEN_STRONG_INLINE static void Execute(Input /* input */, Update update,
-                                          Output output) {
-    output = update;
+  EIGEN_STRONG_INLINE static void Execute(const T& device, Input /* input */,
+                                          Update update, Output output) {
+    output.device(device) = update;
   }
 };
 
-template <typename Input, typename Update, typename Output>
-class UpdateExecutor<Input, Update, Output, scatter_nd_op::UpdateOp::ADD> {
+template <typename T, typename Input, typename Update, typename Output>
+class UpdateExecutor<T, Input, Update, Output, scatter_nd_op::UpdateOp::ADD> {
  public:
-  EIGEN_STRONG_INLINE static void Execute(Input /* input */, Update update,
-                                          Output output) {
-    output += update;
+  EIGEN_STRONG_INLINE static void Execute(const T& device, Input /* input */,
+                                          Update update, Output output) {
+    output.device(device) += update;
   }
 };
 
-template <typename Input, typename Update, typename Output>
-class UpdateExecutor<Input, Update, Output, scatter_nd_op::UpdateOp::SUB> {
+template <typename T, typename Input, typename Update, typename Output>
+class UpdateExecutor<T, Input, Update, Output, scatter_nd_op::UpdateOp::SUB> {
  public:
-  EIGEN_STRONG_INLINE static void Execute(Input /* input */, Update update,
-                                          Output output) {
-    output -= update;
+  EIGEN_STRONG_INLINE static void Execute(const T& device, Input /* input */,
+                                          Update update, Output output) {
+    if constexpr (std::is_same_v<typename Output::Scalar, bool>) {
+      output.device(device) = output != update;
+    } else {
+      output.device(device) -= update;
+    }
   }
 };
 
-template <typename Input, typename Update, typename Output>
-class UpdateExecutor<Input, Update, Output, scatter_nd_op::UpdateOp::MUL> {
+template <typename T, typename Input, typename Update, typename Output>
+class UpdateExecutor<T, Input, Update, Output, scatter_nd_op::UpdateOp::MIN> {
  public:
-  EIGEN_STRONG_INLINE static void Execute(Input input, Update update,
-                                          Output output) {
-    output = input * update;
+  EIGEN_STRONG_INLINE static void Execute(const T& device, Input /* input */,
+                                          Update update, Output output) {
+    output.device(device) = output.cwiseMin(update);
   }
 };
 
-template <typename Input, typename Update, typename Output>
-class UpdateExecutor<Input, Update, Output, scatter_nd_op::UpdateOp::DIV> {
+template <typename T, typename Input, typename Update, typename Output>
+class UpdateExecutor<T, Input, Update, Output, scatter_nd_op::UpdateOp::MAX> {
  public:
-  EIGEN_STRONG_INLINE static void Execute(Input input, Update update,
-                                          Output output) {
-    output = input / update;
+  EIGEN_STRONG_INLINE static void Execute(const T& device, Input /* input */,
+                                          Update update, Output output) {
+    output.device(device) = output.cwiseMax(update);
   }
 };
 
@@ -118,33 +124,87 @@ struct ScatterNdFunctor<CPUDevice, T, Index, OP, IXDIM> {
     const Eigen::DenseIndex batch_size = Tindices.dimension(0);
 
     Index batch_strides[IXDIM];
-    for (int dim = IXDIM - 1; dim >= 0; --dim) {
-      if (dim == IXDIM - 1) {
-        batch_strides[dim] = 1;
-      } else {
-        batch_strides[dim] =
-            batch_strides[dim + 1] * output_shape_prefix[dim + 1];
-      }
+    if (IXDIM > 0) {
+      batch_strides[IXDIM - 1] = 1;
+    }
+    for (int dim = IXDIM - 2; dim >= 0; --dim) {
+      batch_strides[dim] =
+          batch_strides[dim + 1] * output_shape_prefix[dim + 1];
     }
 
-    for (Eigen::DenseIndex loc = 0; loc < batch_size; ++loc) {
-      Index i = 0;
-      bool out_of_bounds = false;
-      for (int dim = 0; dim < IXDIM; ++dim) {
-        const Index ix_d = internal::SubtleMustCopy(Tindices(loc, dim));
-        out_of_bounds |= !FastBoundsCheck(ix_d, output_shape_prefix[dim]);
-        i += ix_d * batch_strides[dim];
+    const bool is_scalar_update = Tupdates.size() == 1;
+    if (slice_size == 1) {
+      T* out_data = Toutput.data();
+      const T* update_data = Tupdates.data();
+      for (Eigen::DenseIndex loc = 0; loc < batch_size; ++loc) {
+        Index i = 0;
+        bool out_of_bounds = false;
+        for (int dim = 0; dim < IXDIM; ++dim) {
+          const Index ix_d = internal::SubtleMustCopy(Tindices(loc, dim));
+          out_of_bounds |= !FastBoundsCheck(ix_d, output_shape_prefix[dim]);
+          i += ix_d * batch_strides[dim];
+        }
+        if (TF_PREDICT_FALSE(out_of_bounds)) {
+          error_loc = loc;
+          continue;
+        }
+        const T& update_val = update_data[is_scalar_update ? 0 : loc];
+        if constexpr (OP == scatter_nd_op::UpdateOp::ASSIGN) {
+          out_data[i] = update_val;
+        } else if constexpr (OP == scatter_nd_op::UpdateOp::ADD) {
+          if constexpr (std::is_same_v<T, tstring>) {
+            out_data[i].append(update_val);
+          } else if constexpr (std::is_same_v<T, bool>) {
+            out_data[i] |= update_val;
+          } else {
+            out_data[i] += update_val;
+          }
+        } else if constexpr (OP == scatter_nd_op::UpdateOp::SUB) {
+          if constexpr (std::is_same_v<T, bool>) {
+            out_data[i] ^= update_val;
+          } else if constexpr (!std::is_same_v<T, tstring>) {
+            out_data[i] -= update_val;
+          }
+        } else if constexpr (OP == scatter_nd_op::UpdateOp::MIN) {
+          if constexpr (!std::is_same_v<T, tstring>) {
+            out_data[i] = std::min(out_data[i], update_val);
+          }
+        } else if constexpr (OP == scatter_nd_op::UpdateOp::MAX) {
+          if constexpr (!std::is_same_v<T, tstring>) {
+            out_data[i] = std::max(out_data[i], update_val);
+          }
+        }
       }
-      if (TF_PREDICT_FALSE(out_of_bounds)) {
-        error_loc = loc;
-        break;
-      } else {
+    } else {
+      for (Eigen::DenseIndex loc = 0; loc < batch_size; ++loc) {
+        Index i = 0;
+        bool out_of_bounds = false;
+        for (int dim = 0; dim < IXDIM; ++dim) {
+          const Index ix_d = internal::SubtleMustCopy(Tindices(loc, dim));
+          out_of_bounds |= !FastBoundsCheck(ix_d, output_shape_prefix[dim]);
+          i += ix_d * batch_strides[dim];
+        }
+        if (TF_PREDICT_FALSE(out_of_bounds)) {
+          error_loc = loc;
+          // Don't break the loop here, but continue to update the rest because
+          // the caller might ignore bad indices.
+          continue;
+        }
         auto input_chip = Toutput.template chip<0>(i);
-        auto output_chip = input_chip.device(d);
-        auto update_chip = Tupdates.template chip<0>(loc);
-        update_executor::UpdateExecutor<
-            decltype(input_chip), decltype(update_chip), decltype(output_chip),
-            OP>::Execute(input_chip, update_chip, output_chip);
+        auto output_chip = input_chip;
+        if (is_scalar_update) {
+          auto update_chip = input_chip.constant(Tupdates(0, 0));
+          update_executor::UpdateExecutor<
+              CPUDevice, decltype(input_chip), decltype(update_chip),
+              decltype(output_chip), OP>::Execute(d, input_chip, update_chip,
+                                                  output_chip);
+        } else {
+          auto update_chip = Tupdates.template chip<0>(loc);
+          update_executor::UpdateExecutor<
+              CPUDevice, decltype(input_chip), decltype(update_chip),
+              decltype(output_chip), OP>::Execute(d, input_chip, update_chip,
+                                                  output_chip);
+        }
       }
     }
 
@@ -173,21 +233,24 @@ struct ScatterNdFunctor<CPUDevice, T, Index, OP, IXDIM> {
 #define REGISTER_SCATTER_ND_MATH(type)                           \
   REGISTER_SCATTER_ND_INDEX(type, scatter_nd_op::UpdateOp::ADD); \
   REGISTER_SCATTER_ND_INDEX(type, scatter_nd_op::UpdateOp::SUB);
-// TODO(simister): Re-enable after identifying a way to reduce the binary size
-// due to too many template instantiations.
-//  REGISTER_SCATTER_ND_INDEX(type, scatter_nd_op::UpdateOp::MUL);
-//  REGISTER_SCATTER_ND_INDEX(type, scatter_nd_op::UpdateOp::DIV);
+
+#define REGISTER_SCATTER_ND_MIN_MAX(type)                        \
+  REGISTER_SCATTER_ND_INDEX(type, scatter_nd_op::UpdateOp::MAX); \
+  REGISTER_SCATTER_ND_INDEX(type, scatter_nd_op::UpdateOp::MIN);
 
 TF_CALL_ALL_TYPES(REGISTER_SCATTER_ND_UPDATE);
-TF_CALL_NUMBER_TYPES(REGISTER_SCATTER_ND_MATH)
+REGISTER_SCATTER_ND_INDEX(tstring, scatter_nd_op::UpdateOp::ADD);
+TF_CALL_NUMBER_TYPES(REGISTER_SCATTER_ND_MATH);
+TF_CALL_REAL_NUMBER_TYPES(REGISTER_SCATTER_ND_MIN_MAX);
+TF_CALL_bool(REGISTER_SCATTER_ND_MATH);
 
 #undef REGISTER_SCATTER_ND_MATH
+#undef REGISTER_SCATTER_ND_MIN_MAX
 #undef REGISTER_SCATTER_ND_UPDATE
 #undef REGISTER_SCATTER_ND_INDEX
 #undef REGISTER_SCATTER_ND_FULL
-
 }  // namespace functor
 
 }  // namespace tensorflow
 
-#endif  // THIRD_PARTY_TENSORFLOW_CORE_KERNELS_SCATTER_ND_OP_CPU_IMPL_H_
+#endif  // TENSORFLOW_CORE_KERNELS_SCATTER_ND_OP_CPU_IMPL_H_

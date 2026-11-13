@@ -13,11 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/core/common_runtime/graph_optimizer.h"
+#include <string>
+#include <vector>
 
-#include "tensorflow/core/common_runtime/constant_folding.h"
-#include "tensorflow/core/common_runtime/function.h"
+#include "absl/container/inlined_vector.h"
+#include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 #include "tensorflow/core/common_runtime/optimization_registry.h"
+#include "tensorflow/core/framework/tensor_shape.h"
+#include "tensorflow/core/framework/tensor_shape.pb.h"
+#include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/graph/algorithm.h"
 #include "tensorflow/core/graph/node_builder.h"
 #include "tensorflow/core/graph/optimizer_cse.h"
@@ -30,44 +35,50 @@ namespace {
 // leaves it untouched otherwise.
 class ParallelConcatRemovePass : public GraphOptimizationPass {
  public:
-  Status Run(const GraphOptimizationPassOptions& options) override {
+  absl::Status Run(const GraphOptimizationPassOptions& options) override {
     if (options.graph == nullptr) {
       // TODO(apassos) returning OK feels weird here as we can't do anything
       // without a graph, but some tests require this.
-      return Status::OK();
+      return absl::OkStatus();
     }
     Graph* g = options.graph->get();
     if (g == nullptr) {
-      return errors::Internal(
+      return absl::InternalError(
           "Parallel concat removal should happen before partitioning and a "
           "graph should be available.");
     }
-    gtl::InlinedVector<Node*, 2> matches;
-    for (Node* n : g->nodes()) {
+    absl::InlinedVector<Node*, 2UL> matches;
+    for (Node* n : g->op_nodes()) {
       if (n->type_string() == "ParallelConcat") {
         matches.push_back(n);
       }
     }
     for (Node* n : matches) {
-      AttrSlice n_attrs(n->def());
-      auto base_make_node = [n, g, &n_attrs](const string& op,
-                                             const string& name) {
-        NodeBuilder node_builder(name, op);
-        node_builder.Device(n->def().device());
-        string colo;
-        if (GetNodeAttr(n_attrs, "_class", &colo).ok()) {
+      AttrSlice n_attrs = n->attrs();
+      auto base_make_node = [n, &n_attrs](const std::string& op,
+                                          const std::string& name) {
+        NodeDebugInfo debug_info(*n);
+        NodeBuilder node_builder(name, op, OpRegistry::Global(), &debug_info);
+        node_builder.Device(n->requested_device());
+        const std::string& colo = GetNodeAttrString(n_attrs, "_class");
+        if (!colo.empty()) {
           node_builder.Attr("_class", colo);
         }
         return node_builder;
       };
-      auto make_node = [n, g, &n_attrs, &base_make_node](string op) {
-        return base_make_node(
-            op, g->NewName(strings::StrCat(n->name(), "/Internal")));
+      auto make_node = [n, g, &base_make_node](std::string op) {
+        return base_make_node(op,
+                              g->NewName(absl::StrCat(n->name(), "/Internal")));
       };
       DataType dtype;
       TF_RETURN_IF_ERROR(GetNodeAttr(n_attrs, "T", &dtype));
       TensorShapeProto shape;
       TF_RETURN_IF_ERROR(GetNodeAttr(n_attrs, "shape", &shape));
+      // A shape whose element count overflows int64 must be rejected here:
+      // the rewrite would otherwise materialize a TensorShape from it
+      // through code paths that CHECK-fail on overflow and abort the
+      // process.
+      TF_RETURN_IF_ERROR(TensorShape::IsValidShape(shape));
 
       // Add the start node
       Node* start;
@@ -78,7 +89,6 @@ class ParallelConcatRemovePass : public GraphOptimizationPass {
 
       // Add all the inplace_updates.
       std::vector<Node*> control_nodes;
-      int64 i = 0;
       for (const Edge* input_edge : n->in_edges()) {
         if (input_edge->IsControlEdge()) {
           g->AddControlEdge(input_edge->src(), start);
@@ -88,13 +98,11 @@ class ParallelConcatRemovePass : public GraphOptimizationPass {
         Node* update;
         TF_RETURN_IF_ERROR(
             make_node("_ParallelConcatUpdate")
-                .Attr("loc", i)
+                .Attr("loc", input_edge->dst_input())
                 .Input(start)
                 .Input(input_edge->src(), input_edge->src_output())
                 .Finalize(g, &update));
         control_nodes.push_back(update);
-
-        ++i;
       }
 
       // Add the final identity.
@@ -116,10 +124,10 @@ class ParallelConcatRemovePass : public GraphOptimizationPass {
       }
       g->RemoveNode(n);
     }
-    return Status::OK();
+    return absl::OkStatus();
   }
 };
-REGISTER_OPTIMIZATION(OptimizationPassRegistry::PRE_PLACEMENT, 0,
+REGISTER_OPTIMIZATION(OptimizationPassRegistry::PRE_PLACEMENT, 10,
                       ParallelConcatRemovePass);
 
 }  // namespace

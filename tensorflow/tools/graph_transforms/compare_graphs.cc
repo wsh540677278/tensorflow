@@ -24,11 +24,12 @@ limitations under the License.
 // The return value is 0 if the graphs are equal, 1 if they're different, and -1
 // if there was a problem.
 
-#include "tensorflow/core/graph/equal_graph_def.h"
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/init_main.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/util/command_line_flags.h"
+#include "tensorflow/core/util/equal_graph_def.h"
+#include "tensorflow/tools/graph_transforms/file_utils.h"
 #include "tensorflow/tools/graph_transforms/transform_utils.h"
 
 namespace tensorflow {
@@ -45,22 +46,22 @@ int ParseFlagsAndCompareGraphs(int argc, char* argv[]) {
   }
 
   GraphDef a;
-  Status a_load_status = LoadTextOrBinaryGraphFile(argv[1], &a);
+  absl::Status a_load_status = LoadTextOrBinaryGraphFile(argv[1], &a);
   if (!a_load_status.ok()) {
     LOG(ERROR) << "Loading graph '" << argv[1] << "' failed with "
-               << a_load_status.error_message();
+               << a_load_status.message();
     return -1;
   }
 
   GraphDef b;
-  Status b_load_status = LoadTextOrBinaryGraphFile(argv[2], &b);
+  absl::Status b_load_status = LoadTextOrBinaryGraphFile(argv[2], &b);
   if (!b_load_status.ok()) {
     LOG(ERROR) << "Loading graph '" << argv[2] << "' failed with "
-               << b_load_status.error_message();
+               << b_load_status.message();
     return -1;
   }
 
-  string diff;
+  std::string diff;
   if (EqualGraphDef(a, b, &diff)) {
     std::cout << "Graphs are equal." << std::endl;
     return 0;

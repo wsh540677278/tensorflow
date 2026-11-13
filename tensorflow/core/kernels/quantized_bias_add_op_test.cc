@@ -13,12 +13,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#define EIGEN_USE_THREADS
+
 #include <functional>
 
-#include "tensorflow/core/kernels/quantization_utils.h"
 #include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/fake_input.h"
-#include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/node_def_builder.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -27,6 +27,7 @@ limitations under the License.
 #include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/kernels/ops_testutil.h"
 #include "tensorflow/core/kernels/ops_util.h"
+#include "tensorflow/core/kernels/quantization_utils.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/platform/test.h"
 
@@ -73,10 +74,10 @@ TEST_F(QuantizedBiasAddTest, Small) {
                             input_quantized.flat<quint8>());
   AddInputFromArray<quint8>(bias_quantized.shape(),
                             bias_quantized.flat<quint8>());
-  AddInputFromArray<float>(TensorShape({1}), {input_min});
-  AddInputFromArray<float>(TensorShape({1}), {input_max});
-  AddInputFromArray<float>(TensorShape({1}), {bias_min});
-  AddInputFromArray<float>(TensorShape({1}), {bias_max});
+  AddInputFromArray<float>(TensorShape({}), {input_min});
+  AddInputFromArray<float>(TensorShape({}), {input_max});
+  AddInputFromArray<float>(TensorShape({}), {bias_min});
+  AddInputFromArray<float>(TensorShape({}), {bias_max});
   TF_ASSERT_OK(RunOpKernel());
   const Tensor& output_quantized = *GetOutput(0);
   const float output_min = GetOutput(1)->flat<float>()(0);
@@ -155,10 +156,10 @@ TEST_F(QuantizedBiasAddTest, RealData) {
                             input_quantized.flat<quint8>());
   AddInputFromArray<quint8>(bias_quantized.shape(),
                             bias_quantized.flat<quint8>());
-  AddInputFromArray<float>(TensorShape({1}), {input_min});
-  AddInputFromArray<float>(TensorShape({1}), {input_max});
-  AddInputFromArray<float>(TensorShape({1}), {bias_min});
-  AddInputFromArray<float>(TensorShape({1}), {bias_max});
+  AddInputFromArray<float>(TensorShape({}), {input_min});
+  AddInputFromArray<float>(TensorShape({}), {input_max});
+  AddInputFromArray<float>(TensorShape({}), {bias_min});
+  AddInputFromArray<float>(TensorShape({}), {bias_max});
   TF_ASSERT_OK(RunOpKernel());
   const Tensor& output_quantized = *GetOutput(0);
   const float output_min = GetOutput(1)->flat<float>()(0);

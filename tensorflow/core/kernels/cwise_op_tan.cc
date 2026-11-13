@@ -16,21 +16,15 @@ limitations under the License.
 #include "tensorflow/core/kernels/cwise_ops_common.h"
 
 namespace tensorflow {
-REGISTER2(UnaryOp, CPU, "Tan", functor::tan, float, double);
 
-#if TENSORFLOW_USE_SYCL
-#define REGISTER_SYCL_KERNEL(TYPE)                                    \
-  REGISTER_KERNEL_BUILDER(                                            \
-                          Name("Tan")                                 \
-                          .Device(DEVICE_SYCL)                        \
-                          .TypeConstraint<TYPE>("T"),                 \
-                          UnaryOp<SYCLDevice, functor::tan<TYPE>>);
-REGISTER_SYCL_KERNEL(float);
-REGISTER_SYCL_KERNEL(double);
-#undef REGISTER_SYCL_KERNEL
-#endif // TENSORFLOW_USE_SYC
+REGISTER6(UnaryOp, CPU, "Tan", functor::tan, Eigen::half, bfloat16, float,
+          double, complex64, complex128);
 
-#if GOOGLE_CUDA
-REGISTER2(UnaryOp, GPU, "Tan", functor::tan, float, double);
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+#if !defined(MLIR_GENERATED_GPU_KERNELS_ENABLED)
+REGISTER3(UnaryOp, GPU, "Tan", functor::tan, Eigen::half, float, double);
 #endif
+REGISTER(UnaryOp, GPU, "Tan", functor::tan, bfloat16);
+#endif
+
 }  // namespace tensorflow

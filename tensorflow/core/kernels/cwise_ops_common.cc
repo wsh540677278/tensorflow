@@ -20,13 +20,15 @@ namespace tensorflow {
 BinaryOpShared::BinaryOpShared(OpKernelConstruction* ctx, DataType out,
                                DataType in)
     : OpKernel(ctx) {
+#if !defined(INTEL_MKL) || !defined(ENABLE_MKL)
   OP_REQUIRES_OK(ctx, ctx->MatchSignature({in, in}, {out}));
+#endif  // !INTEL_MKL || !ENABLE_MKL
 }
 
 void BinaryOpShared::SetUnimplementedError(OpKernelContext* ctx) {
-  ctx->SetStatus(errors::Unimplemented(
+  ctx->SetStatus(absl::UnimplementedError(absl::StrCat(
       "Broadcast between ", ctx->input(0).shape().DebugString(), " and ",
-      ctx->input(1).shape().DebugString(), " is not supported yet."));
+      ctx->input(1).shape().DebugString(), " is not supported yet.")));
 }
 
 void BinaryOpShared::SetComputeError(OpKernelContext* ctx) {
@@ -34,14 +36,19 @@ void BinaryOpShared::SetComputeError(OpKernelContext* ctx) {
   // associated information.  This is sufficient for now, since the only binary
   // ops that have compute errors are integer division and mod, and the only
   // error they produce is zero division.
-  const string& op = ctx->op_kernel().type_string();
+  const std::string& op = ctx->op_kernel().type_string();
   if ((op == "Div" || op == "Mod" || op == "FloorMod" || op == "FloorDiv") &&
       DataTypeIsInteger(ctx->op_kernel().input_type(0))) {
-    ctx->CtxFailure(errors::InvalidArgument("Integer division by zero"));
+    ctx->CtxFailure(absl::InvalidArgumentError("Integer division by zero"));
+  } else if ((op == "Pow") &&
+             DataTypeIsInteger(ctx->op_kernel().input_type(0)) &&
+             DataTypeIsSigned(ctx->op_kernel().input_type(1))) {
+    ctx->CtxFailure(absl::InvalidArgumentError(
+        "Integers to negative integer powers are not allowed"));
   } else {
     ctx->CtxFailure(
-        errors::Internal("Unexpected error in binary operator "
-                         "(only integer div and mod should have errors)"));
+        absl::InternalError("Unexpected error in binary operator "
+                            "(only integer div and mod should have errors)"));
   }
 }
 
@@ -50,11 +57,23 @@ BinaryOpShared::BinaryOpState::BinaryOpState(OpKernelContext* ctx)
       in1(ctx->input(1)),
       bcast(BCast::FromShape(in0.shape()), BCast::FromShape(in1.shape())) {
   if (!bcast.IsValid()) {
-    ctx->SetStatus(errors::InvalidArgument("Incompatible shapes: ",
-                                           in0.shape().DebugString(), " vs. ",
-                                           in1.shape().DebugString()));
+    bool incompatible_shape_error;
+    bool has_attr =
+        TryGetNodeAttr(ctx->op_kernel().def(), "incompatible_shape_error",
+                       &(incompatible_shape_error));
+    if (has_attr && !incompatible_shape_error) {
+      const std::string& op = ctx->op_kernel().type_string();
+      OP_REQUIRES_OK(ctx, ctx->allocate_output(0, TensorShape({}), &out));
+      result = (op == "NotEqual");
+      return;
+    }
+
+    ctx->SetStatus(absl::InvalidArgumentError(
+        absl::StrCat("Incompatible shapes: ", in0.shape().DebugString(),
+                     " vs. ", in1.shape().DebugString())));
     return;
   }
+
   const TensorShape output_shape = BCast::ToShape(bcast.output_shape());
   out_num_elements = output_shape.num_elements();
   in0_num_elements = in0.NumElements();

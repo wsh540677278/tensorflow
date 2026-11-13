@@ -1,22 +1,25 @@
-// Copyright 2016 The TensorFlow Authors. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+Copyright 2016 The TensorFlow Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package tensorflow
 
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -69,6 +72,120 @@ func TestSessionRunNeg(t *testing.T) {
 				t.Error(err)
 			}
 		})
+	}
+}
+
+func TestMultipleInput(t *testing.T) {
+	// The inputs to the graph get sorted. This test checks that process works
+	// OK and that we still get the right output.
+	graph := NewGraph()
+
+	inputs := make([]Output, 20)
+	layer2 := make([]Output, len(inputs))
+	for i := range inputs {
+		in, err := Placeholder(graph, fmt.Sprintf("input%d", i), Int64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inputs[i] = in
+
+		factor, err := Const(graph, fmt.Sprintf("factor%d", i), int64(i+1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		l2, err := graph.AddOperation(OpSpec{
+			Type: "Mul",
+			Name: fmt.Sprintf("Mul%d", i),
+			Input: []Input{
+				in,
+				factor,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		layer2[i] = l2.Output(0)
+	}
+
+	fetch, err := graph.AddOperation(OpSpec{
+		Type: "AddN",
+		Input: []Input{
+			OutputList(layer2),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	session, err := NewSession(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	feeds := make(map[Output]*Tensor, len(inputs))
+	for i, in := range inputs {
+		tensor, err := NewTensor(int64(i + 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		feeds[in] = tensor
+	}
+
+	output, err := session.Run(
+		feeds,
+		[]Output{
+			fetch.Output(0),
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var exp int64
+	for i := range inputs {
+		exp += int64((i + 1) * (i + 1))
+	}
+	if v := output[0].Value().(int64); v != exp {
+		t.Fatalf("expected %d got %d", exp, v)
+	}
+}
+
+func TestInputOrderStable(t *testing.T) {
+	graph := NewGraph()
+
+	inputs := make([]Output, 20)
+	for i := range inputs {
+		in, err := Placeholder(graph, fmt.Sprintf("input%d", i), Int64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		in.Index = i
+		inputs[i] = in
+	}
+
+	makeArgs := func() *cRunArgs {
+		feeds := make(map[Output]*Tensor, len(inputs))
+		for i, in := range inputs {
+			tensor, err := NewTensor(int64(i + 1))
+			if err != nil {
+				t.Fatal(err)
+			}
+			feeds[in] = tensor
+		}
+
+		return newCRunArgs(feeds, nil, nil)
+	}
+	args1 := makeArgs()
+	args2 := makeArgs()
+
+	if !reflect.DeepEqual(args1.feeds, args2.feeds) {
+		t.Fatalf("order is not stable")
 	}
 }
 
@@ -259,8 +376,8 @@ func TestSessionConfig(t *testing.T) {
 	// tensorflow Python program:
 	/*
 	 import tensorflow
-	 c = tensorflow.ConfigProto()
-	 c.intra_op_parallelism_threads = 1
+	 c = tensorflow.compat.v1.ConfigProto()
+	 c.inter_op_parallelism_threads = 1
 	 print c.SerializeToString()
 	*/
 	graph := NewGraph()
@@ -279,5 +396,53 @@ func TestSessionConfig(t *testing.T) {
 	}
 	if output[0].Value().(int32) != 14 {
 		t.Fatalf("Got %v, want -1", output[0].Value())
+	}
+}
+
+func TestSessionConfigInvalid(t *testing.T) {
+	// SessionOptions.c() returns early when TF_SetConfig rejects Config, and
+	// has to free its C copy of Config there too (GitHub issue 129133).
+	graph := NewGraph()
+	opts := SessionOptions{Config: []byte("invalid config")}
+	_, err := NewSession(graph, &opts)
+	if err == nil {
+		t.Fatal("Expected error from NewSession with invalid config, got nil")
+	}
+	if got, want := err.Error(), "invalid SessionOptions.Config"; !strings.Contains(got, want) {
+		t.Errorf("Got error %q, want it to contain %q", got, want)
+	}
+}
+
+func TestListDevices(t *testing.T) {
+	s, err := NewSession(NewGraph(), nil)
+	if err != nil {
+		t.Fatalf("NewSession(): %v", err)
+	}
+
+	devices, err := s.ListDevices()
+	if err != nil {
+		t.Fatalf("ListDevices(): %v", err)
+	}
+
+	if len(devices) == 0 {
+		t.Fatalf("no devices detected")
+	}
+}
+
+func TestDeviceString(t *testing.T) {
+	d := Device{Name: "foo", Type: "bar", MemoryLimitBytes: 12345}
+	got := d.String()
+	want := "(Device: name \"foo\", type bar, memory limit 12345 bytes)"
+	if got != want {
+		t.Errorf("Got \"%s\", want \"%s\"", got, want)
+	}
+}
+
+func TestDeviceStringNoMemoryLimit(t *testing.T) {
+	d := Device{Name: "foo", Type: "bar", MemoryLimitBytes: -1}
+	got := d.String()
+	want := "(Device: name \"foo\", type bar, no memory limit)"
+	if got != want {
+		t.Errorf("Got \"%s\", want \"%s\"", got, want)
 	}
 }

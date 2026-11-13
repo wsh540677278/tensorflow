@@ -16,57 +16,40 @@ limitations under the License.
 #include "tensorflow/core/graph/testlib.h"
 
 #include <vector>
+#include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/node_def_builder.h"
+#include "tensorflow/core/framework/node_def_util.h"
 #include "tensorflow/core/framework/op.h"
-#include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/graph/graph.h"
 #include "tensorflow/core/graph/node_builder.h"
-#include "tensorflow/core/kernels/constant_op.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/platform/logging.h"
 
 namespace tensorflow {
-
-// HostConst: forced to generate output on the host.
-// Only used by testlib; no op is registered for this kernel
-// externally (i.e., in array_ops.cc)
-REGISTER_KERNEL_BUILDER(Name("HostConst").Device(DEVICE_CPU), HostConstantOp);
-REGISTER_KERNEL_BUILDER(
-    Name("HostConst").Device(DEVICE_GPU).HostMemory("output"), HostConstantOp);
-
-// Register the HostConst Op
-// Returns a constant tensor on the host.  Useful for writing C++ tests
-// and benchmarks which run on GPU but require arguments pinned to the host.
-// Used by test::graph::HostConstant.
-// value: Attr `value` is the tensor to return.
-REGISTER_OP("HostConst")
-    .Output("output: dtype")
-    .Attr("value: tensor")
-    .Attr("dtype: type");
-
 namespace test {
 namespace graph {
 
-Node* Send(Graph* g, Node* input, const string& tensor, const string& sender,
-           const uint64 sender_incarnation, const string& receiver) {
+Node* Send(Graph* g, Node* input, const std::string& tensor,
+           const std::string& sender, const uint64_t sender_incarnation,
+           const std::string& receiver) {
   Node* ret;
   TF_CHECK_OK(NodeBuilder(g->NewName("n"), "_Send")
                   .Input(input, 0)
                   .Attr("tensor_name", tensor)
                   .Attr("send_device", sender)
                   .Attr("send_device_incarnation",
-                        static_cast<int64>(sender_incarnation))
+                        static_cast<int64_t>(sender_incarnation))
                   .Attr("recv_device", receiver)
                   .Finalize(g, &ret));
   return ret;
 }
 
-Node* Recv(Graph* g, const string& tensor, const string& type,
-           const string& sender, const uint64 sender_incarnation,
-           const string& receiver) {
+Node* Recv(Graph* g, const std::string& tensor, const std::string& type,
+           const std::string& sender, const uint64_t sender_incarnation,
+           const std::string& receiver) {
   Node* ret;
   DataType dtype;
   CHECK(DataTypeFromString(type, &dtype));
@@ -75,7 +58,7 @@ Node* Recv(Graph* g, const string& tensor, const string& type,
                   .Attr("tensor_name", tensor)
                   .Attr("send_device", sender)
                   .Attr("send_device_incarnation",
-                        static_cast<int64>(sender_incarnation))
+                        static_cast<int64_t>(sender_incarnation))
                   .Attr("recv_device", receiver)
                   .Finalize(g, &ret));
   return ret;
@@ -90,7 +73,7 @@ Node* Constant(Graph* g, const Tensor& tensor) {
   return ret;
 }
 
-Node* Constant(Graph* g, const Tensor& tensor, const string& name) {
+Node* Constant(Graph* g, const Tensor& tensor, const std::string& name) {
   Node* ret;
   TF_CHECK_OK(NodeBuilder(name, "Const")
                   .Attr("dtype", tensor.dtype())
@@ -103,7 +86,7 @@ Node* HostConstant(Graph* g, const Tensor& tensor) {
   return HostConstant(g, tensor, g->NewName("n"));
 }
 
-Node* HostConstant(Graph* g, const Tensor& tensor, const string& name) {
+Node* HostConstant(Graph* g, const Tensor& tensor, const std::string& name) {
   Node* ret;
   TF_CHECK_OK(NodeBuilder(name, "HostConst")
                   .Attr("dtype", tensor.dtype())
@@ -122,7 +105,7 @@ Node* Var(Graph* g, const DataType dtype, const TensorShape& shape) {
 }
 
 Node* Var(Graph* g, const DataType dtype, const TensorShape& shape,
-          const string& name) {
+          const std::string& name) {
   Node* ret;
   TF_CHECK_OK(NodeBuilder(name, "Variable")
                   .Attr("dtype", dtype)
@@ -141,7 +124,18 @@ Node* Assign(Graph* g, Node* var, Node* val) {
   return ret;
 }
 
-Node* Reduce(Graph* g, const string& reduce, Node* data, Node* axes,
+Node* Cumsum(Graph* g, Node* data, Node* axes, bool exclusive, bool reverse) {
+  Node* ret;
+  TF_CHECK_OK(NodeBuilder(g->NewName("n"), "Cumsum")
+                  .Input(data)
+                  .Input(axes)
+                  .Attr("exclusive", exclusive)
+                  .Attr("reverse", reverse)
+                  .Finalize(g, &ret));
+  return ret;
+}
+
+Node* Reduce(Graph* g, const std::string& reduce, Node* data, Node* axes,
              bool keep_dims) {
   Node* ret;
   TF_CHECK_OK(NodeBuilder(g->NewName("n"), reduce, g->op_registry())
@@ -186,7 +180,7 @@ Node* BatchMatmul(Graph* g, Node* in0, Node* in1, bool adj_x, bool adj_y) {
   return ret;
 }
 
-Node* RandomNumberGenerator(const string& op, Graph* g, Node* input,
+Node* RandomNumberGenerator(const std::string& op, Graph* g, Node* input,
                             DataType dtype) {
   Node* ret;
   TF_CHECK_OK(NodeBuilder(g->NewName("n"), op, g->op_registry())
@@ -229,7 +223,7 @@ Node* RandomPoisson(Graph* g, Node* shape, Node* lam) {
   return ret;
 }
 
-Node* Unary(Graph* g, const string& func, Node* input, int index) {
+Node* Unary(Graph* g, const std::string& func, Node* input, int index) {
   Node* ret;
   TF_CHECK_OK(NodeBuilder(g->NewName("n"), func, g->op_registry())
                   .Input(input, index)
@@ -237,7 +231,7 @@ Node* Unary(Graph* g, const string& func, Node* input, int index) {
   return ret;
 }
 
-Node* Binary(Graph* g, const string& func, Node* in0, Node* in1) {
+Node* Binary(Graph* g, const std::string& func, Node* in0, Node* in1) {
   Node* ret;
   TF_CHECK_OK(NodeBuilder(g->NewName("n"), func, g->op_registry())
                   .Input(in0)
@@ -246,7 +240,7 @@ Node* Binary(Graph* g, const string& func, Node* in0, Node* in1) {
   return ret;
 }
 
-Node* Multi(Graph* g, const string& func, gtl::ArraySlice<Node*> ins) {
+Node* Multi(Graph* g, const std::string& func, absl::Span<Node* const> ins) {
   Node* ret;
   auto b = NodeBuilder(g->NewName("n"), func, g->op_registry());
   for (Node* n : ins) b = b.Input(n);
@@ -268,11 +262,22 @@ Node* Reverse(Graph* g, Node* tensor, Node* axis) {
   return Binary(g, "ReverseV2", tensor, axis);
 }
 
-Node* Error(Graph* g, Node* input, const string& errmsg) {
+Node* Roll(Graph* g, Node* input, Node* shift, Node* axis) {
+  Node* ret;
+  TF_CHECK_OK(NodeBuilder(g->NewName("n"), "Roll", g->op_registry())
+                  .Input(input)
+                  .Input(shift)
+                  .Input(axis)
+                  .Finalize(g, &ret));
+  return ret;
+}
+
+Node* Error(Graph* g, Node* input, const std::string& errmsg, bool log_error) {
   Node* ret;
   TF_CHECK_OK(NodeBuilder(g->NewName("n"), "Error")
                   .Input(input)
                   .Attr("message", errmsg)
+                  .Attr("log_error", log_error)
                   .Finalize(g, &ret));
   return ret;
 }
@@ -313,7 +318,7 @@ Node* Switch(Graph* g, Node* in0, Node* in1) {
   return ret;
 }
 
-Node* Enter(Graph* g, Node* input, const string& frame_name) {
+Node* Enter(Graph* g, Node* input, const std::string& frame_name) {
   Node* ret;
   TF_CHECK_OK(NodeBuilder(g->NewName("n"), "Enter")
                   .Input(input)
@@ -337,11 +342,11 @@ Node* Merge(Graph* g, Node* in0, Node* in1) {
   return ret;
 }
 
-Node* Merge(Graph* g, Node* in0, gtl::ArraySlice<string> remaining_in) {
+Node* Merge(Graph* g, Node* in0, absl::Span<const std::string> remaining_in) {
   std::vector<NodeBuilder::NodeOut> inputs;
   inputs.reserve(remaining_in.size() + 1);
   inputs.emplace_back(in0);
-  for (const string& in_name : remaining_in) {
+  for (const std::string& in_name : remaining_in) {
     inputs.emplace_back(in_name, 0, inputs[0].dt);
   }
 
@@ -351,7 +356,7 @@ Node* Merge(Graph* g, Node* in0, gtl::ArraySlice<string> remaining_in) {
   return ret;
 }
 
-Node* Concat(Graph* g, Node* concat_dim, gtl::ArraySlice<Node*> tensors) {
+Node* Concat(Graph* g, Node* concat_dim, absl::Span<Node* const> tensors) {
   std::vector<NodeBuilder::NodeOut> nodeouts;
   nodeouts.reserve(tensors.size());
   for (auto const t : tensors) {
@@ -365,7 +370,7 @@ Node* Concat(Graph* g, Node* concat_dim, gtl::ArraySlice<Node*> tensors) {
   return ret;
 }
 
-Node* ConcatV2(Graph* g, gtl::ArraySlice<Node*> tensors, Node* concat_dim) {
+Node* ConcatV2(Graph* g, absl::Span<Node* const> tensors, Node* concat_dim) {
   std::vector<NodeBuilder::NodeOut> nodeouts;
   nodeouts.reserve(tensors.size());
   for (auto const t : tensors) {
@@ -379,7 +384,7 @@ Node* ConcatV2(Graph* g, gtl::ArraySlice<Node*> tensors, Node* concat_dim) {
   return ret;
 }
 
-Node* Next(Graph* g, const string& name, Node* input) {
+Node* Next(Graph* g, const std::string& name, Node* input) {
   Node* ret;
   TF_CHECK_OK(
       NodeBuilder(name, "NextIteration").Input(input).Finalize(g, &ret));
@@ -416,29 +421,12 @@ Node* Cast(Graph* g, Node* in, DataType dst) {
   return ret;
 }
 
-Node* BroadcastArgs(Graph* g, Node* s0, Node* s1) {
+Node* Gather(Graph* g, Node* in0, Node* in1, Node* axis) {
   Node* ret;
-  TF_CHECK_OK(NodeBuilder(g->NewName("n"), "BroadcastArgs")
-                  .Input(s0)
-                  .Input(s1)
-                  .Finalize(g, &ret));
-  return ret;
-}
-
-Node* BroadcastGradientArgs(Graph* g, Node* s0, Node* s1) {
-  Node* ret;
-  TF_CHECK_OK(NodeBuilder(g->NewName("n"), "BroadcastGradientArgs")
-                  .Input(s0)
-                  .Input(s1)
-                  .Finalize(g, &ret));
-  return ret;
-}
-
-Node* Gather(Graph* g, Node* in0, Node* in1) {
-  Node* ret;
-  TF_CHECK_OK(NodeBuilder(g->NewName("n"), "Gather")
+  TF_CHECK_OK(NodeBuilder(g->NewName("n"), "GatherV2")
                   .Input(in0)
                   .Input(in1)
+                  .Input(axis)
                   .Finalize(g, &ret));
   return ret;
 }
@@ -488,6 +476,51 @@ Node* Conv2D(Graph* g, Node* in0, Node* in1) {
                   .Attr("T", DT_FLOAT)
                   .Attr("strides", {1, 1, 1, 1})
                   .Attr("padding", "SAME")
+                  .Finalize(g, &ret));
+  return ret;
+}
+
+Node* Diag(Graph* g, Node* in, DataType type) {
+  Node* ret;
+  TF_CHECK_OK(NodeBuilder(g->NewName("n"), "Diag")
+                  .Input(in)
+                  .Attr("T", type)
+                  .Finalize(g, &ret));
+  return ret;
+}
+
+Node* DiagPart(Graph* g, Node* in, DataType type) {
+  Node* ret;
+  TF_CHECK_OK(NodeBuilder(g->NewName("n"), "DiagPart")
+                  .Input(in)
+                  .Attr("T", type)
+                  .Finalize(g, &ret));
+  return ret;
+}
+
+Node* CheckNumerics(Graph* g, Node* in, const std::string& message) {
+  Node* ret;
+  TF_CHECK_OK(NodeBuilder(g->NewName("n"), "CheckNumerics")
+                  .Input(in)
+                  .Attr("message", message)
+                  .Finalize(g, &ret));
+  return ret;
+}
+
+Node* Arg(Graph* g, int64_t index, DataType type) {
+  Node* ret;
+  TF_CHECK_OK(NodeBuilder(g->NewName("n"), "_Arg")
+                  .Attr("T", type)
+                  .Attr("index", index)
+                  .Finalize(g, &ret));
+  return ret;
+}
+
+Node* Retval(Graph* g, int64_t index, Node* in, int64_t in_index) {
+  Node* ret;
+  TF_CHECK_OK(NodeBuilder(g->NewName("n"), "_Retval")
+                  .Input(in, in_index)
+                  .Attr("index", index)
                   .Finalize(g, &ret));
   return ret;
 }

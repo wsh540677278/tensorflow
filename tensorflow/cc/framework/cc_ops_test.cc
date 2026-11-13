@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <string>
+
 #include "tensorflow/cc/client/client_session.h"
 #include "tensorflow/cc/framework/testutil.h"
 #include "tensorflow/cc/ops/standard_ops.h"
@@ -22,8 +24,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status_test_util.h"
 
 namespace tensorflow {
-using namespace ops;  // NOLINT(build/namespaces)
-
+namespace ops {
 namespace {
 
 Output Linear(const Scope& scope, Input x, Input w, Input b) {
@@ -32,13 +33,12 @@ Output Linear(const Scope& scope, Input x, Input w, Input b) {
   return BiasAdd(cop_scopes.last, m, b);
 }
 
-void GetColocationConstraints(Output tensor, std::vector<string>* constraints) {
+void GetColocationConstraints(const Output& tensor,
+                              std::vector<std::string>* constraints) {
   constraints->clear();
-  TF_EXPECT_OK(
-      GetNodeAttr(tensor.op().node()->def(), kColocationAttrName, constraints));
+  TF_EXPECT_OK(GetNodeAttr(tensor.op().node()->attrs(), kColocationAttrName,
+                           constraints));
 }
-
-}  // namespace
 
 TEST(CCOpTest, Basic) {
   Scope root = Scope::NewRootScope();
@@ -158,18 +158,18 @@ TEST(CCOpTest, KernelLabel) {
   Scope root = Scope::NewRootScope();
   auto add = Add(root.WithKernelLabel("AddWithKernelLabel"), 1.0f, 2.0f);
   TF_EXPECT_OK(root.status());
-  const auto& attrs = add.z.op().node()->def().attr();
-  ASSERT_TRUE(attrs.find("_kernel") != attrs.end());
-  auto kernel_attr = attrs.find("_kernel")->second;
-  TF_EXPECT_OK(AttrValueHasType(kernel_attr, "string"));
-  EXPECT_EQ(kernel_attr.s(), "AddWithKernelLabel");
+  AttrSlice attrs = add.z.op().node()->attrs();
+  const auto* kernel_attr = attrs.Find("_kernel");
+  ASSERT_TRUE(kernel_attr);
+  TF_EXPECT_OK(AttrValueHasType(*kernel_attr, "string"));
+  EXPECT_EQ(kernel_attr->s(), "AddWithKernelLabel");
 }
 
 TEST(CCOpTest, ColocateWith) {
   Scope root = Scope::NewRootScope();
   auto c1 = Const(root.WithOpName("c1"), 1);
   auto c2 = Const(root.WithOpName("c2").ColocateWith(c1), 2);
-  std::vector<string> constraints;
+  std::vector<std::string> constraints;
   GetColocationConstraints(c2, &constraints);
   EXPECT_EQ(constraints[0], "loc:@c1");
 
@@ -189,8 +189,7 @@ TEST(CCOpTest, ColocateWith) {
 
   Scope with_colocate = root.ColocateWith(c3).ColocateWith(c4);
   auto c6 = Const(with_colocate.WithOpName("c6").ClearColocation(), 7);
-  const auto& attrs = c6.op().node()->def().attr();
-  EXPECT_TRUE(attrs.find("_class") == attrs.end());
+  EXPECT_FALSE(c6.op().node()->attrs().Find("_class"));
 }
 
 TEST(CCOpTest, TemplatedConst) {
@@ -203,10 +202,10 @@ TEST(CCOpTest, TemplatedConst) {
   test::ExpectTensorEqual<float>(
       out, test::AsTensor<float>({3.f, 2.f, -1.f, 0.f}, {2, 2}));
 
-  auto c2 = ops::Const<string>(root, {{"this"}, {"is"}, {"a"}, {"constant"}});
+  auto c2 = ops::Const<tstring>(root, {{"this"}, {"is"}, {"a"}, {"constant"}});
   test::GetTensor(root, c2, &out);
-  test::ExpectTensorEqual<string>(
-      out, test::AsTensor<string>({"this", "is", "a", "constant"}, {4, 1}));
+  test::ExpectTensorEqual<tstring>(
+      out, test::AsTensor<tstring>({"this", "is", "a", "constant"}, {4, 1}));
 }
 
 TEST(CCOpTest, EmptyConst) {
@@ -240,13 +239,15 @@ TEST(CCOpTest, EmptyConst) {
 
 TEST(CCOpTest, InvalidFinalize) {
   Scope root = Scope::NewRootScope();
-  auto read_up_to =
-      ops::ReaderReadUpTo(root, Variable(root, {}, DT_STRING),
-                          Variable(root, {}, DT_STRING), static_cast<int32>(2));
+  auto read_up_to = ops::ReaderReadUpTo(root, Variable(root, {}, DT_STRING),
+                                        Variable(root, {}, DT_STRING),
+                                        static_cast<int32_t>(2));
   EXPECT_FALSE(root.status().ok());
-  auto err_msg = root.status().error_message();
+  auto err_msg = std::string(root.status().message());
   EXPECT_NE(err_msg.find("'num_records' passed int32 expected int64"),
-            string::npos);
+            std::string::npos);
 }
 
+}  // namespace
+}  // namespace ops
 }  // namespace tensorflow

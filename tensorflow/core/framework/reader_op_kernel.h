@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_FRAMEWORK_READER_OP_KERNEL_H_
-#define TENSORFLOW_FRAMEWORK_READER_OP_KERNEL_H_
+#ifndef TENSORFLOW_CORE_FRAMEWORK_READER_OP_KERNEL_H_
+#define TENSORFLOW_CORE_FRAMEWORK_READER_OP_KERNEL_H_
 
 #include <functional>
 #include <string>
@@ -36,32 +36,53 @@ class ReaderOpKernel : public ResourceOpKernel<ReaderInterface> {
  public:
   using ResourceOpKernel::ResourceOpKernel;
 
-  // Must be called by descendants before the first call to Compute()
-  // (typically called during construction).  factory must return a
-  // ReaderInterface descendant allocated with new that ReaderOpKernel
-  // will take ownership of.
+  // Must be called by descendants before the first call to Compute() (typically
+  // called during construction).  factory must return a ReaderInterface
+  // descendant allocated with new that ReaderOpKernel will take ownership of.
   void SetReaderFactory(std::function<ReaderInterface*()> factory)
-      LOCKS_EXCLUDED(mu_) {
+      TF_LOCKS_EXCLUDED(mu_) {
+    DCHECK(get_resource() == nullptr);
     mutex_lock l(mu_);
-    DCHECK(resource_ == nullptr);
     factory_ = factory;
   }
 
+  void Compute(OpKernelContext* context) override {
+    if (!IsCancellable()) {
+      ResourceOpKernel<ReaderInterface>::Compute(context);
+    } else {
+      // Install cancellation
+      CancellationManager* cm = context->cancellation_manager();
+      CancellationToken token = cm->get_cancellation_token();
+      bool already_cancelled =
+          !cm->RegisterCallback(token, [this]() { this->Cancel(); });
+
+      if (!already_cancelled) {
+        ResourceOpKernel<ReaderInterface>::Compute(context);
+      } else {
+        context->SetStatus(
+            absl::CancelledError("read operation was cancelled"));
+      }
+    }
+  }
+
  private:
-  Status CreateResource(ReaderInterface** reader)
-      EXCLUSIVE_LOCKS_REQUIRED(mu_) override {
+  virtual bool IsCancellable() const { return false; }
+  virtual void Cancel() {}
+
+  absl::Status CreateResource(ReaderInterface** reader)
+      TF_EXCLUSIVE_LOCKS_REQUIRED(mu_) override {
     *reader = factory_();
     if (*reader == nullptr) {
-      return errors::ResourceExhausted("Failed to allocate reader");
+      return absl::ResourceExhaustedError("Failed to allocate reader");
     }
     std::function<ReaderInterface*()> temp = nullptr;
     factory_.swap(temp);
-    return Status::OK();
+    return absl::OkStatus();
   }
 
-  std::function<ReaderInterface*()> factory_ GUARDED_BY(mu_);
+  std::function<ReaderInterface*()> factory_ TF_GUARDED_BY(mu_);
 };
 
 }  // namespace tensorflow
 
-#endif  // TENSORFLOW_FRAMEWORK_READER_OP_KERNEL_H_
+#endif  // TENSORFLOW_CORE_FRAMEWORK_READER_OP_KERNEL_H_

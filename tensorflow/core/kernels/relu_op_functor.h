@@ -13,11 +13,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_KERNELS_RELU_OP_FUNCTOR_H_
-#define TENSORFLOW_KERNELS_RELU_OP_FUNCTOR_H_
+#ifndef TENSORFLOW_CORE_KERNELS_RELU_OP_FUNCTOR_H_
+#define TENSORFLOW_CORE_KERNELS_RELU_OP_FUNCTOR_H_
 // Functor definition for ReluOp and ReluGradOp, must be compilable by nvcc.
 
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "unsupported/Eigen/CXX11/Tensor"  // from @eigen_archive
 #include "tensorflow/core/framework/tensor_types.h"
 
 namespace tensorflow {
@@ -32,7 +32,8 @@ struct Relu {
   // activations: same shape as "features".
   void operator()(const Device& d, typename TTypes<T>::ConstTensor features,
                   typename TTypes<T>::Tensor activations) {
-    activations.device(d) = features.cwiseMax(static_cast<T>(0));
+    activations.device(d) =
+        features.template cwiseMax<Eigen::PropagateNaN>(static_cast<T>(0));
   }
 };
 
@@ -66,7 +67,8 @@ struct Relu6 {
   void operator()(const Device& d, typename TTypes<T>::ConstTensor features,
                   typename TTypes<T>::Tensor activations) {
     activations.device(d) =
-        features.cwiseMax(static_cast<T>(0)).cwiseMin(static_cast<T>(6));
+        features.template cwiseMax<Eigen::PropagateNaN>(static_cast<T>(0))
+            .template cwiseMin<Eigen::PropagateNaN>(static_cast<T>(6));
   }
 };
 
@@ -76,18 +78,67 @@ struct Relu6Grad {
   // Computes Relu6Grad backprops.
   //
   // gradients: gradients backpropagated to the Relu6 op.
-  // features: inputs that where passed to the Relu6 op.
+  // features: inputs that where passed to the Relu6 op, or its outputs.
   // backprops: gradients to backpropagate to the Relu6 inputs.
   void operator()(const Device& d, typename TTypes<T>::ConstTensor gradients,
                   typename TTypes<T>::ConstTensor features,
                   typename TTypes<T>::Tensor backprops) {
     // NOTE: When the activation is exactly zero or six, we
-    // arbitrarily choose to not propagate the associated gradient
-    // value.
+    // make sure not to propagate the associated gradient
+    // value. This allows "features" to be either the input or the output of
+    // the relu6.
+    // Explicitly propagate NaN if features is NaN, consistent with Relu6
+    // forward op which propagates NaNs via Eigen::PropagateNaN.
     backprops.device(d) =
-        gradients *
-        ((features > static_cast<T>(0)) * (features < static_cast<T>(6)))
-            .template cast<T>();
+        (features.isnan())
+            .select(features, gradients * ((features > static_cast<T>(0)) *
+                                           (features < static_cast<T>(6)))
+                                              .template cast<T>());
+  }
+};
+
+// Functor used by LeakyReluOp to do the computations.
+template <typename Device, typename T>
+struct LeakyRelu {
+  // Computes LeakyRelu activation.
+  //
+  // features: any shape.
+  // activations: same shape as "features".
+
+  // Need to bundle the args (to the LeakyRelu functor) within a struct
+  // Not doing so leads to Eigen kernel args not getting populated
+  // corretly for Eigen::half type (when building on the ROCM platform)
+  struct LeakyReluArgs {
+    const Device& d;
+    typename TTypes<T>::ConstTensor features;
+    T alpha;
+    typename TTypes<T>::Tensor activations;
+  };
+  void operator()(LeakyReluArgs args) {
+    // Note that alpha might be > 1 or < 0, so we don't use cwiseMax here.
+    args.activations.device(args.d) =
+        (args.features > static_cast<T>(0))
+            .select(args.features, args.features * args.alpha);
+  }
+};
+
+// Functor used by LeakyReluGradOp to do the computations.
+template <typename Device, typename T>
+struct LeakyReluGrad {
+  // Computes LeakyReluGrad backprops.
+  //
+  // gradients: gradients backpropagated to the LeakyRelu op.
+  // features: either the inputs that were passed to the LeakyRelu or, or its
+  //           outputs (using either one yields the same result here).
+  // backprops: gradients to backpropagate to the LeakyRelu inputs.
+  void operator()(const Device& d, typename TTypes<T>::ConstTensor gradients,
+                  typename TTypes<T>::ConstTensor features, T alpha,
+                  typename TTypes<T>::Tensor backprops) {
+    // Propagate NaN if features is NaN, matching IEEE-754 and SeluGrad.
+    backprops.device(d) =
+        (features.isnan())
+            .select(features, (features > static_cast<T>(0))
+                                  .select(gradients, gradients * alpha));
   }
 };
 
@@ -100,11 +151,9 @@ struct Elu {
   // activations: same shape as "features".
   void operator()(const Device& d, typename TTypes<T>::ConstTensor features,
                   typename TTypes<T>::Tensor activations) {
-    // features.constant(?)
+    // Use expm1 (exp(x) - 1) to avoid catastrophic cancellation for small x.
     activations.device(d) =
-        (features < static_cast<T>(0))
-            .select(features.exp() - features.constant(static_cast<T>(1)),
-                    features);
+        (features < static_cast<T>(0)).select(features.expm1(), features);
   }
 };
 
@@ -119,13 +168,58 @@ struct EluGrad {
   void operator()(const Device& d, typename TTypes<T>::ConstTensor gradients,
                   typename TTypes<T>::ConstTensor activations,
                   typename TTypes<T>::Tensor backprops) {
+    // Propagate NaN if activations is NaN, preventing NaN from being silently
+    // dropped and matching XLA and SeluGrad semantics.
     backprops.device(d) =
-        (activations < static_cast<T>(0))
-            .select((activations + static_cast<T>(1)) * gradients, gradients);
+        (activations > static_cast<T>(0))
+            .select(gradients, (activations + static_cast<T>(1)) * gradients);
+  }
+};
+
+// Functor used by SeluOp to do the computations.
+template <typename Device, typename T>
+struct Selu {
+  // Computes Selu activation.
+  //
+  // features: any shape.
+  // activations: same shape as "features".
+  void operator()(const Device& d, typename TTypes<T>::ConstTensor features,
+                  typename TTypes<T>::Tensor activations) {
+    // Use expm1 (exp(x) - 1) to avoid catastrophic cancellation for small x.
+    const auto scale = static_cast<T>(1.0507009873554804934193349852946);
+    const auto scale_alpha = static_cast<T>(1.7580993408473768599402175208123);
+    const auto zero = static_cast<T>(0);
+    activations.device(d) =
+        (features.isnan())
+            .select(features, (features < zero)
+                                  .select(scale_alpha * features.expm1(),
+                                          scale * features));
+  }
+};
+
+// Functor used by SeluGradOp to do the computations.
+template <typename Device, typename T>
+struct SeluGrad {
+  // Computes SeluGrad backprops.
+  //
+  // gradients: gradients backpropagated to the Selu op.
+  // activations: outputs of the Selu op.
+  // backprops: gradients to backpropagate to the Selu inputs.
+  void operator()(const Device& d, typename TTypes<T>::ConstTensor gradients,
+                  typename TTypes<T>::ConstTensor activations,
+                  typename TTypes<T>::Tensor backprops) {
+    const auto scale = static_cast<T>(1.0507009873554804934193349852946);
+    const auto scale_alpha = static_cast<T>(1.7580993408473768599402175208123);
+    backprops.device(d) =
+        (activations.isnan())
+            .select(activations,
+                    (activations < static_cast<T>(0))
+                        .select(gradients * (activations + scale_alpha),
+                                gradients * scale));
   }
 };
 
 }  // namespace functor
 }  // namespace tensorflow
 
-#endif  // TENSORFLOW_KERNELS_RELU_OP_FUNCTOR_H_
+#endif  // TENSORFLOW_CORE_KERNELS_RELU_OP_FUNCTOR_H_

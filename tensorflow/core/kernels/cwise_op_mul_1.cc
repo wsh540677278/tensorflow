@@ -17,30 +17,26 @@ limitations under the License.
 
 namespace tensorflow {
 
-REGISTER5(BinaryOp, CPU, "Mul", functor::mul, float, Eigen::half, double,
-          uint8, int32);
+REGISTER6(BinaryOp, CPU, "Mul", functor::mul, float, Eigen::half, double,
+          uint8_t, int32_t, bfloat16);
+REGISTER6(BinaryOp, CPU, "MulNoNan", functor::mul_no_nan, Eigen::half, float,
+          double, complex64, complex128, bfloat16);
 
-#if TENSORFLOW_USE_SYCL
-#define REGISTER_SYCL_KERNEL(TYPE)                                    \
-  REGISTER_KERNEL_BUILDER(                                            \
-                          Name("Mul")                                 \
-                          .Device(DEVICE_SYCL)                        \
-                          .TypeConstraint<TYPE>("T"),                 \
-                          BinaryOp<SYCLDevice, functor::mul<TYPE>>);
-REGISTER_SYCL_KERNEL(float)
-REGISTER_SYCL_KERNEL(double)
-#undef REGISTER_SYCL_KERNEL
-REGISTER_KERNEL_BUILDER(Name("Mul")
-                            .Device(DEVICE_SYCL)
-                            .HostMemory("x")
-                            .HostMemory("y")
-                            .HostMemory("z")
-                            .TypeConstraint<int32>("T"),
-                        BinaryOp<CPUDevice, functor::mul<int32>>);
-#endif // TENSORFLOW_USE_SYCL
-#if GOOGLE_CUDA
-REGISTER4(BinaryOp, GPU, "Mul", functor::mul, float, Eigen::half, double,
-           uint8);
+#if defined(__ANDROID_TYPES_SLIM__)
+// We only register the first type when we have multi-argument calls in the
+// case where we're trying to reduce executable size, but it turns out that the
+// int32 version of this op is needed, so explicitly include it.
+REGISTER(BinaryOp, CPU, "Mul", functor::mul, int32);
+#endif  // __ANDROID_TYPES_SLIM__
+
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+#if !defined(MLIR_GENERATED_GPU_KERNELS_ENABLED)
+REGISTER4(BinaryOp, GPU, "Mul", functor::mul, Eigen::half, float, double,
+          uint8);
+#endif
+
+REGISTER(BinaryOp, GPU, "Mul", functor::mul, bfloat16);
+
 // A special GPU kernel for int32.
 // TODO(b/25387198): Also enable int32 in device memory. This kernel
 // registration requires all int32 inputs and outputs to be in host memory.
@@ -49,8 +45,22 @@ REGISTER_KERNEL_BUILDER(Name("Mul")
                             .HostMemory("x")
                             .HostMemory("y")
                             .HostMemory("z")
-                            .TypeConstraint<int32>("T"),
-                        BinaryOp<CPUDevice, functor::mul<int32>>);
+                            .TypeConstraint<int32_t>("T"),
+                        BinaryOp<CPUDevice, functor::mul<int32_t>>);
 #endif
+REGISTER_KERNEL_BUILDER(Name("Mul")
+                            .Device(DEVICE_DEFAULT)
+                            .HostMemory("x")
+                            .HostMemory("y")
+                            .HostMemory("z")
+                            .TypeConstraint<int32_t>("T"),
+                        BinaryOp<CPUDevice, functor::mul<int32_t>>);
+
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+#if !defined(MLIR_GENERATED_GPU_KERNELS_ENABLED)
+REGISTER5(BinaryOp, GPU, "MulNoNan", functor::mul_no_nan, Eigen::half, float,
+          double, complex64, complex128);
+#endif
+#endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
 }  // namespace tensorflow

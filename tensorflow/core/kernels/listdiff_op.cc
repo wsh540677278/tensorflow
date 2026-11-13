@@ -24,12 +24,13 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 
 namespace tensorflow {
-template <typename T>
+template <typename T, typename Tidx>
 class ListDiffOp : public OpKernel {
  public:
   explicit ListDiffOp(OpKernelConstruction* context) : OpKernel(context) {
     const DataType dt = DataTypeToEnum<T>::v();
-    OP_REQUIRES_OK(context, context->MatchSignature({dt, dt}, {dt, DT_INT32}));
+    const DataType dtidx = DataTypeToEnum<Tidx>::v();
+    OP_REQUIRES_OK(context, context->MatchSignature({dt, dt}, {dt, dtidx}));
   }
 
   void Compute(OpKernelContext* context) override {
@@ -37,18 +38,18 @@ class ListDiffOp : public OpKernel {
     const Tensor& y = context->input(1);
 
     OP_REQUIRES(context, TensorShapeUtils::IsVector(x.shape()),
-                errors::InvalidArgument("x should be a 1D vector."));
+                absl::InvalidArgumentError("x should be a 1D vector."));
 
     OP_REQUIRES(context, TensorShapeUtils::IsVector(y.shape()),
-                errors::InvalidArgument("y should be a 1D vector."));
+                absl::InvalidArgumentError("y should be a 1D vector."));
 
     const auto Tx = x.vec<T>();
     const size_t x_size = Tx.size();
     const auto Ty = y.vec<T>();
     const size_t y_size = Ty.size();
 
-    OP_REQUIRES(context, x_size < std::numeric_limits<int32>::max(),
-                errors::InvalidArgument("x too large for int32 indexing"));
+    OP_REQUIRES(context, x_size < std::numeric_limits<int32_t>::max(),
+                absl::InvalidArgumentError("x too large for int32 indexing"));
 
     std::unordered_set<T> y_set;
     y_set.reserve(y_size);
@@ -58,7 +59,7 @@ class ListDiffOp : public OpKernel {
 
     // Compute the size of the output.
 
-    int64 out_size = 0;
+    int64_t out_size = 0;
     for (size_t i = 0; i < x_size; ++i) {
       if (y_set.count(Tx(i)) == 0) {
         ++out_size;
@@ -72,9 +73,9 @@ class ListDiffOp : public OpKernel {
 
     Tensor* indices = nullptr;
     OP_REQUIRES_OK(context, context->allocate_output(1, {out_size}, &indices));
-    auto Tindices = indices->vec<int32>();
+    auto Tindices = indices->vec<Tidx>();
 
-    for (int i = 0, p = 0; i < static_cast<int32>(x_size); ++i) {
+    for (Tidx i = 0, p = 0; i < static_cast<Tidx>(x_size); ++i) {
       if (y_set.count(Tx(i)) == 0) {
         OP_REQUIRES(context, p < out_size,
                     errors::InvalidArgument(
@@ -90,15 +91,20 @@ class ListDiffOp : public OpKernel {
   }
 };
 
-#define REGISTER_LISTDIFF(type)                                  \
-  REGISTER_KERNEL_BUILDER(Name("ListDiff")                       \
-                              .Device(DEVICE_CPU)                \
-                              .TypeConstraint<type>("T")         \
-                              .TypeConstraint<int32>("out_idx"), \
-                          ListDiffOp<type>)
+#define REGISTER_LISTDIFF(type)                                    \
+  REGISTER_KERNEL_BUILDER(Name("ListDiff")                         \
+                              .Device(DEVICE_CPU)                  \
+                              .TypeConstraint<type>("T")           \
+                              .TypeConstraint<int32>("out_idx"),   \
+                          ListDiffOp<type, int32>)                 \
+  REGISTER_KERNEL_BUILDER(Name("ListDiff")                         \
+                              .Device(DEVICE_CPU)                  \
+                              .TypeConstraint<type>("T")           \
+                              .TypeConstraint<int64_t>("out_idx"), \
+                          ListDiffOp<type, int64>)
 
 TF_CALL_REAL_NUMBER_TYPES(REGISTER_LISTDIFF);
-REGISTER_LISTDIFF(string);
+REGISTER_LISTDIFF(tstring);
 #undef REGISTER_LISTDIFF
 
 }  // namespace tensorflow
